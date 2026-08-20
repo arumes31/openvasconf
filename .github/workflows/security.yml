@@ -1,0 +1,191 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-security:
+    name: Go security scanners
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read # Resolve workflow metadata during SARIF upload.
+      contents: read
+      security-events: write # Publish gosec findings to code scanning.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install scanners
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - name: Run gosec
+        id: gosec
+        shell: bash
+        run: |
+          set +e
+          gosec -fmt sarif -out gosec.sarif ./...
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload gosec SARIF
+        if: ${{ always() && hashFiles('gosec.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+      - name: Enforce gosec result
+        if: ${{ steps.gosec.outputs.status != '0' }}
+        run: exit 1
+      - name: Run govulncheck
+        id: govulncheck
+        shell: bash
+        run: |
+          set +e
+          govulncheck -json ./... > govulncheck.json
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload govulncheck report
+        if: ${{ always() && hashFiles('govulncheck.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: govulncheck
+          path: govulncheck.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce govulncheck result
+        if: ${{ steps.govulncheck.outputs.status != '0' }}
+        run: exit 1
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read # Let CodeQL resolve workflow-run metadata.
+      contents: read
+      security-events: write # Publish CodeQL analysis results.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          languages: go,javascript-typescript
+          build-mode: none
+      - name: Analyze with CodeQL
+        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+
+  dependency-review:
+    name: Dependency review
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-1.0, AGPL-3.0
+
+  container-security:
+    name: Dockerfile and image security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      actions: read # Resolve workflow metadata during SARIF upload.
+      contents: read
+      security-events: write # Publish Trivy findings to code scanning.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@2a66e89f53d0771bb131a7fa31f3136336094aa6 # v3.4.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+      - name: Build image
+        run: docker build --tag openvasconf:security .
+      - name: Scan source filesystem
+        id: trivy-fs
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Upload filesystem SARIF
+        if: ${{ always() && hashFiles('trivy-fs.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-filesystem
+      - name: Scan container image
+        id: trivy-image
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: openvasconf:security
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Upload image SARIF
+        if: ${{ always() && hashFiles('trivy-image.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-container
+      - name: Enforce Trivy results
+        if: ${{ steps.trivy-fs.outcome == 'failure' || steps.trivy-image.outcome == 'failure' }}
+        run: exit 1

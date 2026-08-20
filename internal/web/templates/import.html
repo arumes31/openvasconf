@@ -1,0 +1,8 @@
+{{template "head" .}}
+<section class="hero-row"><div><p class="eyebrow">PORTABLE DESIRED STATE</p><h1>Import</h1><p class="lede small">Validate a versioned JSON export before applying it. Omitted customers are never deleted.</p></div><a class="secondary" href="/export">Download current JSON</a></section>
+{{if .Import}}
+<section class="panel form-panel"><div class="panel-index">REVIEW / 02</div><div class="metric-grid compact-metrics"><article class="metric"><span>Customers</span><strong>{{.Import.Customers}}</strong></article><article class="metric"><span>Create</span><strong>{{.Import.Creates}}</strong></article><article class="metric"><span>Update</span><strong>{{.Import.Updates}}</strong></article></div><p>{{.Import.Networks}} network definitions passed validation.</p><form method="post" action="/import/apply"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="preview_token" value="{{.PreviewToken}}"><button class="primary" type="submit">Apply validated import <span>→</span></button></form></section>
+{{else}}
+<form method="post" action="/import/preview" enctype="multipart/form-data" class="panel form-panel"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><div class="panel-index">SELECT / 01</div><label>Configuration export<input type="file" name="configuration" accept="application/json,.json" required><small>Maximum 1 MiB, 500 customers, 2,000 networks per customer.</small></label><button class="primary" type="submit">Validate and preview <span>→</span></button></form>
+{{end}}
+{{template "foot" .}}

@@ -1,0 +1,13 @@
+.git
+.cache
+data
+secrets
+docs
+*.db
+*.db-shm
+*.db-wal
+openvasconf
+openvasconf.exe
+dist
+test-artifacts
+node_modules

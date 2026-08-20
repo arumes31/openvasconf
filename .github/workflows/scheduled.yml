@@ -1,0 +1,69 @@
+name: Weekly deep scan
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-deep-scan
+  cancel-in-progress: false
+
+jobs:
+  deep-scan:
+    name: Race, vulnerability, and image scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      actions: read # Resolve workflow metadata during SARIF upload.
+      contents: read
+      security-events: write # Publish the weekly Trivy SARIF report.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run repeated race tests
+        run: go test -race -shuffle=on -count=10 ./...
+      - name: Install Go security scanners
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - name: Run gosec
+        run: gosec ./...
+      - name: Run govulncheck
+        run: govulncheck ./...
+      - name: Build fresh image
+        run: docker build --no-cache --tag openvasconf:weekly .
+      - name: Scan fresh image
+        id: trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: openvasconf:weekly
+          format: sarif
+          output: trivy-weekly.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Upload weekly SARIF
+        if: ${{ always() && hashFiles('trivy-weekly.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: trivy-weekly.sarif
+          category: trivy-weekly-container
+      - name: Enforce weekly Trivy result
+        if: ${{ steps.trivy.outcome == 'failure' }}
+        run: exit 1

@@ -1,0 +1,50 @@
+{{template "head" .}}
+<section class="hero-row">
+  <div><p class="eyebrow">CURRENT OPERATING PICTURE</p><h1>Scan operations</h1></div>
+  <div class="button-row"><button class="secondary" type="button" data-compact-toggle>Compact view</button><form method="post" action="/sync"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="primary" type="submit">Synchronize all <span>↻</span></button></form></div>
+</section>
+
+<section class="metric-grid">
+  <article class="metric"><span>Visible customers</span><strong>{{len .Customers}}</strong><small>filtered tenants</small></article>
+  <article class="metric"><span>GMP link</span><strong class="compact">{{if .GreenboneVersion}}ONLINE{{else}}OFFLINE{{end}}</strong><small>{{if .GreenboneVersion}}version {{.GreenboneVersion}}{{else}}check socket{{end}}</small></article>
+  <article class="metric"><span>Default policy</span><strong class="compact">{{if .Settings.ScanConfig.Name}}{{.Settings.ScanConfig.Name}}{{else}}PENDING{{end}}</strong><small>{{.Settings.PortList.Name}}</small></article>
+</section>
+{{if or (not .Settings.Scanner.ID) (not .Settings.ScanConfig.ID) (not .Settings.PortList.ID)}}<p class="alert alert-warn"><span>DEFAULTS</span>Required scanner, scan configuration, or port-list defaults are missing. <a href="/settings">Configure Greenbone objects.</a></p>{{end}}
+
+<section class="panel operations-strip" data-operations-url="/api/operations">
+  <div><span class="eyebrow">LIVE GREENBONE</span><strong data-op-latency>Loading…</strong><small>GMP response latency</small></div>
+  <div><span>Active scans</span><strong data-op-active>—</strong><small data-op-task>Querying task state</small><small data-op-recent></small></div>
+  <div><span>Feeds</span><strong data-op-feeds>—</strong><small data-op-feed-age>Querying feed versions</small></div>
+</section>
+
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">MANAGED TENANTS</p><h2>Customers</h2></div><div class="button-row"><a class="secondary" href="/import">Import / export</a><a class="secondary" href="/customers/new">+ Add customer</a></div></div>
+  <form method="get" action="/" class="filter-bar">
+    <label>Search<input type="search" name="q" value="{{.Query.Search}}" placeholder="name, description, tag"></label>
+    <label>State<select name="status"><option value="">All states</option>{{range $s := (list "pending" "syncing" "applied" "error")}}<option value="{{$s}}" {{if selected $.Query.Status $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <label>Sort<select name="sort"><option value="name" {{if selected .Query.Sort "name"}}selected{{end}}>Name</option><option value="status" {{if selected .Query.Sort "status"}}selected{{end}}>State</option><option value="next_scan" {{if selected .Query.Sort "next_scan"}}selected{{end}}>Weekly slot</option><option value="updated_at" {{if selected .Query.Sort "updated_at"}}selected{{end}}>Modified</option></select></label>
+    <label>Order<select name="order"><option value="asc">Ascending</option><option value="desc" {{if .Query.Descending}}selected{{end}}>Descending</option></select></label>
+    <button class="secondary" type="submit">Apply</button>
+  </form>
+  <form id="bulk-sync" method="post" action="/sync-selected"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
+  {{if .Customers}}
+  <div class="bulk-row"><button class="secondary" form="bulk-sync" type="submit">Synchronize selected</button><small>Selection is limited to this filtered view.</small></div>
+  <div class="table-scroll"><table class="customer-table">
+    <thead><tr><th><span class="sr-only">Select</span></th><th>Customer</th><th>Scope</th><th>Next weekly scan</th><th>Desired / applied / remote</th><th>Progress</th><th>Actions</th></tr></thead>
+    <tbody>{{range .Customers}}
+      <tr data-customer-id="{{.ID}}">
+        <td><input class="row-check" form="bulk-sync" type="checkbox" name="customer_id" value="{{.ID}}" aria-label="Select {{.Name}}"></td>
+        <td><strong>{{.Name}}</strong>{{if .Description}}<small>{{.Description}}</small>{{end}}<div class="tags">{{range .Tags}}<span>{{.}}</span>{{end}}</div><small>Created {{.CreatedAt.Format "2006-01-02"}} · modified {{.UpdatedAt.Format "2006-01-02 15:04"}}</small></td>
+        <td><strong>{{len .Networks}} definitions</strong><small>Scanner: {{effectiveScanner . $.Settings}}</small><small>Config: {{effectiveConfig . $.Settings}}</small><small>Ports: {{effectivePorts . $.Settings}}</small></td>
+        <td><strong>{{weekday .ScheduleWeekday}} · {{.ScheduleTime}}</strong><small title="Computed in {{.Timezone}}; daylight-saving transitions are handled by the IANA timezone database.">{{nextScan .}}</small>{{if outOfPolicy . $.Settings}}<small class="warning-copy">Outside current global defaults; preserved until randomized or edited.</small>{{end}}</td>
+        <td><span class="state-stack"><span>Desired r{{.DesiredRevision}}</span><span class="status status-{{.ReconciliationStatus}}">{{.ReconciliationStatus}}</span><a href="/api/customers/{{.ID}}/drift" target="_blank" rel="noopener">Check remote drift ↗</a></span>{{if .LastSuccessfulReconcile}}<small>Last success {{.LastSuccessfulReconcile.Format "2006-01-02 15:04"}}</small>{{end}}</td>
+        <td data-progress-cell><strong>{{if .Reconciliation.Phase}}{{.Reconciliation.Phase}}{{else}}idle{{end}}</strong>{{if .Reconciliation.TotalOperations}}<progress max="{{.Reconciliation.TotalOperations}}" value="{{.Reconciliation.CompletedOperations}}"></progress><small>{{.Reconciliation.CompletedOperations}}/{{.Reconciliation.TotalOperations}} · attempt {{.Reconciliation.Attempt}}/{{.Reconciliation.MaxAttempts}}</small>{{end}}{{if .Reconciliation.CurrentOperation}}<small>{{.Reconciliation.CurrentOperation}}</small>{{end}}{{if .Reconciliation.NextRetryAt}}<small>Automatic retry {{.Reconciliation.NextRetryAt.Format "15:04:05"}} · {{.Reconciliation.Attempt}} used</small>{{end}}{{if .LastReconciliationError}}<p class="error-copy">{{.LastReconciliationError}}</p>{{end}}{{if .Reconciliation.TechnicalError}}<details><summary>Technical error</summary><code>{{.Reconciliation.TechnicalError}}</code></details>{{end}}</td>
+        <td><div class="row-actions"><a href="/customers/{{.ID}}">Inspect →</a><a href="/customers/{{.ID}}/history">History</a><form method="post" action="/customers/{{.ID}}/{{if eq .ReconciliationStatus "error"}}retry{{else}}sync{{end}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="text-button" type="submit">{{if eq .ReconciliationStatus "error"}}Retry{{else}}Sync{{end}}</button></form></div></td>
+      </tr>
+    {{end}}</tbody>
+  </table></div>
+  {{else}}<div class="empty-state"><span>NO MATCHING CUSTOMER OBJECTS</span><p>Add a customer or clear the current filters.</p></div>{{end}}
+</section>
+
+<section class="panel activity-panel"><div class="section-heading"><div><p class="eyebrow">IMMUTABLE TRACE</p><h2>Recent activity</h2></div></div>{{if .Events}}<ol class="event-list">{{range .Events}}<li><time>{{.CreatedAt.Format "2006-01-02 15:04"}}</time><span class="event-action">{{.Action}}</span><strong>{{.ResourceKind}}</strong><span>{{.ResourceName}}</span></li>{{end}}</ol>{{else}}<p class="muted">No reconciliation activity recorded yet.</p>{{end}}</section>
+{{template "foot" .}}

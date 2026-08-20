@@ -1,0 +1,19 @@
+{{template "head" .}}
+<section class="hero-row"><div><p class="eyebrow">GLOBAL INHERITANCE</p><h1>Greenbone settings</h1><p class="lede small">Object defaults apply through inheritance. Schedule-rule changes preserve every existing customer slot.</p></div><form method="post" action="/settings/test"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="secondary" type="submit">Test Greenbone connection</button></form></section>
+<form method="post" action="/settings" class="panel settings-panel">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><div class="panel-index">GMP OBJECT MAP / 01</div>
+  <div class="settings-grid">
+    <label>Default scanner<select name="scanner_id" required><option value="">Select scanner</option>{{range .Options.Scanners}}<option value="{{.ID}}" {{if selected $.Settings.Scanner.ID .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select><small>{{.Settings.Scanner.ID}}</small></label>
+    <label>Default scan configuration<select name="scan_config_id" required><option value="">Select configuration</option>{{range .Options.ScanConfigs}}<option value="{{.ID}}" {{if selected $.Settings.ScanConfig.ID .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select><small>{{.Settings.ScanConfig.ID}}</small></label>
+    <label>Default port list<select name="port_list_id" required><option value="">Select port list</option>{{range .Options.PortLists}}<option value="{{.ID}}" {{if selected $.Settings.PortList.ID .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select><small>{{.Settings.PortList.ID}}</small></label>
+    <label>Schedule timezone<input name="timezone" value="{{.Settings.Timezone}}" required><small>IANA timezone. Customer dates use this zone and account for DST.</small></label>
+  </div>
+  <div class="panel-index section-index">NEW-CUSTOMER SCHEDULE DEFAULTS / 02</div>
+  <fieldset><legend>Allowed weekdays</legend><div class="check-grid">{{range $d := (list "1" "2" "3" "4")}}<label class="check-label"><input type="checkbox" name="schedule_weekday" value="{{$d}}" {{if eq $d "1"}}{{if containsInt $.Settings.SchedulePolicy.Weekdays 1}}checked{{end}}{{else if eq $d "2"}}{{if containsInt $.Settings.SchedulePolicy.Weekdays 2}}checked{{end}}{{else if eq $d "3"}}{{if containsInt $.Settings.SchedulePolicy.Weekdays 3}}checked{{end}}{{else}}{{if containsInt $.Settings.SchedulePolicy.Weekdays 4}}checked{{end}}{{end}}><span>{{if eq $d "1"}}Monday{{else if eq $d "2"}}Tuesday{{else if eq $d "3"}}Wednesday{{else}}Thursday{{end}}</span></label>{{end}}</div></fieldset>
+  <div class="schedule-fields"><label>Earliest time<input type="time" name="schedule_start" min="07:00" max="15:00" value="{{minuteTime .Settings.SchedulePolicy.StartMinute}}" required></label><label>Latest time<input type="time" name="schedule_end" min="07:00" max="15:00" value="{{minuteTime .Settings.SchedulePolicy.EndMinute}}" required></label></div>
+  <p class="alert alert-warn"><span>PRESERVE</span>Saving these rules does not move existing customer schedules. Use “Randomize schedule” on a customer to opt it into the new window.</p>
+  <div class="settings-meta"><span>INSTALLATION</span><code>{{.Settings.InstallationID}}</code></div>
+  <button class="primary" type="submit">Save global defaults <span>→</span></button>
+</form>
+<section class="panel operations-strip settings-operations" data-operations-url="/api/operations"><div><span class="eyebrow">GMP LATENCY</span><strong data-op-latency>Load live status…</strong></div><div><span>Active scans</span><strong data-op-active>—</strong><small data-op-task>Task status</small></div><div><span>Feed health</span><strong data-op-feeds>—</strong><small data-op-feed-age>Version and age</small></div></section>
+{{template "foot" .}}

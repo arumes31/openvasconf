@@ -1,0 +1,39 @@
+{{define "head"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · openvasconf</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="scanline" aria-hidden="true"></div>
+{{if .Authenticated}}
+<header class="masthead">
+  <a class="brand" href="/"><span class="brand-mark">OV</span><span>openvasconf</span></a>
+  <nav aria-label="Main navigation">
+    <a href="/">Operations</a>
+    <a href="/customers/new">Add customer</a>
+    <a href="/import">Portability</a>
+    <a href="/settings">Greenbone</a>
+  </nav>
+  <form method="post" action="/logout" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button class="text-button" type="submit">Lock console</button>
+  </form>
+</header>
+{{end}}
+<main class="shell">
+{{if .Error}}<div class="alert alert-error" role="alert"><span>FAULT</span>{{.Error}}</div>{{end}}
+{{if .Notice}}<div class="alert"><span>INFO</span>{{.Notice}}</div>{{end}}
+{{if .GreenboneError}}<div class="alert alert-warn" role="alert"><span>GMP</span>{{.GreenboneError}}</div>{{end}}
+{{end}}
+
+{{define "foot"}}
+</main>
+<footer class="footer"><span>DESIRED STATE / GMP 22.4</span><span>OPERATIONS CONSOLE</span></footer>
+</body>
+</html>
+{{end}}

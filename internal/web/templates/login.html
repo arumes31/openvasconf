@@ -1,0 +1,19 @@
+{{template "head" .}}
+<section class="login-grid">
+  <div class="login-identity">
+    <p class="eyebrow">VULNERABILITY SCAN CONTROL</p>
+    <h1>Know the surface.<br><em>Own the schedule.</em></h1>
+    <p class="lede">A deliberate control plane for customer networks, Greenbone targets, and recurring scan tasks.</p>
+    <div class="coordinate">48.2082° N / 16.3738° E</div>
+  </div>
+  <form method="post" action="/login" class="panel login-panel">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="panel-index">AUTH / 01</div>
+    <h2>Operator access</h2>
+    <label>Username<input name="username" value="admin" autocomplete="username" required></label>
+    <label>Password<input type="password" name="password" autocomplete="current-password" required autofocus></label>
+    <button class="primary" type="submit">Enter control plane <span>→</span></button>
+  </form>
+</section>
+{{template "foot" .}}
+

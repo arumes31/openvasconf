@@ -1,0 +1,119 @@
+name: Supply chain
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrity-and-licenses:
+    name: Module integrity and licenses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify Go modules
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Check Go dependency licenses
+        run: |
+          go install github.com/google/go-licenses/v2@v2.0.1
+          go-licenses report --ignore openvasconf ./... > go-licenses.csv
+          go-licenses check --ignore openvasconf --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,MPL-2.0 ./...
+      - name: Check npm dependency licenses
+        run: docker run --rm --volume "$PWD:/src:ro" --workdir /src node:24-alpine node scripts/check-npm-licenses.mjs > npm-licenses.csv
+      - name: Upload license inventories
+        if: ${{ always() && (hashFiles('go-licenses.csv') != '' || hashFiles('npm-licenses.csv') != '') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-licenses
+          path: |
+            go-licenses.csv
+            npm-licenses.csv
+          if-no-files-found: error
+          retention-days: 14
+
+  workflow-security:
+    name: Workflow lint and security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read # Let workflow security tools inspect action metadata.
+      contents: read
+      security-events: write # Publish zizmor findings to code scanning.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Run actionlint
+        run: actionlint -color
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          inputs: .github/workflows
+          persona: pedantic
+          min-severity: low
+          min-confidence: medium
+          online-audits: true
+          advanced-security: true
+
+  scorecard:
+    name: OpenSSF Scorecard
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # Sign and publish the Scorecard result.
+      security-events: write # Publish Scorecard SARIF to code scanning.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+      - name: Upload Scorecard SARIF
+        if: ${{ always() && hashFiles('scorecard.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: scorecard.sarif
+          category: openssf-scorecard

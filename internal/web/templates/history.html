@@ -1,0 +1,16 @@
+{{template "head" .}}
+<section class="hero-row"><div><p class="eyebrow">RECONCILIATION TRACE</p><h1>{{.Form.Name}}</h1><p class="lede small">Every desired-state run and remote operation, with safe and technical diagnostics.</p></div><a class="secondary" href="/customers/{{.Form.ID}}">Back to customer</a></section>
+<section class="panel table-panel">
+{{if .Runs}}
+{{range .Runs}}
+<article class="run-card">
+  <header><strong>Run #{{.ID}} · {{.Status}}</strong><span>{{duration .StartedAt .FinishedAt}}</span></header>
+  <small>{{.StartedAt.Format "2006-01-02 15:04:05 MST"}} · attempt {{.Attempt}} · {{.CompletedOperations}}/{{.TotalOperations}} operations</small>
+  {{if .SafeError}}<p class="error-copy">{{.SafeError}}</p>{{end}}
+  {{if .TechnicalError}}<details><summary>Technical detail</summary><code>{{.TechnicalError}}</code></details>{{end}}
+  {{if .Operations}}<div class="table-scroll"><table><thead><tr><th>Action</th><th>Resource</th><th>Status</th><th>Duration</th></tr></thead><tbody>{{range .Operations}}<tr><td>{{.Action}}</td><td>{{.ResourceKind}}<small>{{.ResourceName}}</small></td><td>{{.Status}}</td><td>{{.Duration}}</td></tr>{{end}}</tbody></table></div>{{end}}
+</article>
+{{end}}
+{{else}}<div class="empty-state"><span>NO RUNS</span><p>This customer has not been reconciled yet.</p></div>{{end}}
+</section>
+{{template "foot" .}}
