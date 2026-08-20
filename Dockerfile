@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24-alpine AS assets
+FROM node:26-alpine AS assets
 
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -22,7 +22,7 @@ COPY --from=assets /src/dist/app.js ./internal/web/static/app.js
 RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/openvasconf ./cmd/openvasconf
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN addgroup -g 1001 -S openvasconf \
     && adduser -u 1001 -S -D -H -G openvasconf openvasconf \
