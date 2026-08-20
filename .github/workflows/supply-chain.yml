@@ -1,6 +1,13 @@
 name: Supply chain
 
 on:
+  workflow_call:
+    inputs:
+      skip_scorecard:
+        description: Skip public Scorecard publication when used as a release gate.
+        required: false
+        type: boolean
+        default: false
   pull_request:
   push:
     branches:
@@ -44,7 +51,7 @@ jobs:
           go-licenses report --ignore openvasconf ./... > go-licenses.csv
           go-licenses check --ignore openvasconf --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,MPL-2.0 ./...
       - name: Check npm dependency licenses
-        run: docker run --rm --volume "$PWD:/src:ro" --workdir /src node:24-alpine node scripts/check-npm-licenses.mjs > npm-licenses.csv
+        run: docker run --rm --volume "$PWD:/src:ro" --workdir /src node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 node scripts/check-npm-licenses.mjs > npm-licenses.csv
       - name: Upload license inventories
         if: ${{ always() && (hashFiles('go-licenses.csv') != '' || hashFiles('npm-licenses.csv') != '') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,7 +83,7 @@ jobs:
       - name: Install actionlint
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Run actionlint
-        run: actionlint -color
+        run: $(go env GOPATH)/bin/actionlint -color
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
         with:
@@ -89,7 +96,7 @@ jobs:
 
   scorecard:
     name: OpenSSF Scorecard
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && !inputs.skip_scorecard }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

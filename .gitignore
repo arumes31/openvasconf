@@ -3,7 +3,6 @@
 /secrets/
 /docs/
 /test-artifacts/
-/deploy/greenbone-compose.yaml
 *.db
 *.db-shm
 *.db-wal

@@ -13,14 +13,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deep-scan:
-    name: Race, vulnerability, and image scan
+  race-tests:
+    name: Repeated race tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      actions: read # Resolve workflow metadata during SARIF upload.
-      contents: read
-      security-events: write # Publish the weekly Trivy SARIF report.
+    timeout-minutes: 45
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
@@ -37,14 +33,86 @@ jobs:
           cache: true
       - name: Run repeated race tests
         run: go test -race -shuffle=on -count=10 ./...
+
+  go-security:
+    name: Weekly Go security scanners
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read # Resolve workflow metadata during SARIF upload.
+      contents: read
+      security-events: write # Publish weekly gosec SARIF.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Install Go security scanners
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
       - name: Run gosec
-        run: gosec ./...
+        id: gosec
+        shell: bash
+        run: |
+          set +e
+          gosec -fmt sarif -out gosec-weekly.sarif ./...
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
       - name: Run govulncheck
-        run: govulncheck ./...
+        id: govulncheck
+        shell: bash
+        run: |
+          set +e
+          govulncheck -json ./... > govulncheck-weekly.json
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload weekly gosec SARIF
+        if: ${{ always() && hashFiles('gosec-weekly.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: gosec-weekly.sarif
+          category: gosec-weekly
+      - name: Upload weekly govulncheck report
+        if: ${{ always() && hashFiles('govulncheck-weekly.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: govulncheck-weekly
+          path: govulncheck-weekly.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Enforce weekly Go security results
+        if: ${{ always() && (steps.gosec.outputs.status != '0' || steps.govulncheck.outputs.status != '0') }}
+        run: exit 1
+
+  image-security:
+    name: Weekly fresh-image scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      actions: read # Resolve workflow metadata during SARIF upload.
+      contents: read
+      security-events: write # Publish the weekly Trivy SARIF report.
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build fresh image
         run: docker build --no-cache --tag openvasconf:weekly .
       - name: Scan fresh image
@@ -52,11 +120,12 @@ jobs:
         continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.73.0
           image-ref: openvasconf:weekly
           format: sarif
           output: trivy-weekly.sarif
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
+          ignore-unfixed: false
           exit-code: '1'
       - name: Upload weekly SARIF
         if: ${{ always() && hashFiles('trivy-weekly.sarif') != '' }}
@@ -65,5 +134,5 @@ jobs:
           sarif_file: trivy-weekly.sarif
           category: trivy-weekly-container
       - name: Enforce weekly Trivy result
-        if: ${{ steps.trivy.outcome == 'failure' }}
+        if: ${{ always() && steps.trivy.outcome == 'failure' }}
         run: exit 1
