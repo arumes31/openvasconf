@@ -1,0 +1,39 @@
+{{template "head" .}}
+{{define "compareFindings"}}
+  {{if .}}<div class="table-scroll"><table>
+    <thead><tr><th>Severity</th><th>Host</th><th>Port</th><th>Finding</th><th>CVEs</th></tr></thead>
+    <tbody>{{range .}}<tr>
+      <td><strong class="threat-{{severityClass .Threat}}">{{printf "%.1f" .Severity}}</strong><small>{{.Threat}}</small></td>
+      <td><code>{{.Host}}</code></td>
+      <td>{{.Port}}</td>
+      <td><strong>{{.Title}}</strong><small><code>{{.NVTOID}}</code></small></td>
+      <td><div class="tags">{{range .CVEs}}<span>{{.}}</span>{{end}}</div></td>
+    </tr>{{end}}</tbody>
+  </table></div>{{else}}<p class="muted">None.</p>{{end}}
+{{end}}
+<section class="hero-row">
+  <div><p class="eyebrow">SNAPSHOT COMPARISON</p><h1>{{if .Compare.Before.CustomerName}}{{.Compare.Before.CustomerName}}{{else}}Compare reports{{end}}</h1></div>
+  <div class="button-row"><a class="secondary" href="/reports/{{.Compare.After.ID}}">Latest report</a><a class="secondary" href="/reports">All reports</a></div>
+</section>
+
+<section class="panel">
+  <div class="section-heading"><div><p class="eyebrow">BEFORE → AFTER</p><h2>Comparison window</h2></div></div>
+  <div class="report-meta">
+    <div><span>Before</span><a href="/reports/{{.Compare.Before.ID}}">{{if .Compare.Before.ScanEnd.IsZero}}{{.Compare.Before.ReportID}}{{else}}{{.Compare.Before.ScanEnd.Format "2006-01-02 15:04"}}{{end}}</a><small>H {{.Compare.Before.CountHigh}} · M {{.Compare.Before.CountMedium}} · {{.Compare.Before.FindingCount}} findings</small></div>
+    <div><span>After</span><a href="/reports/{{.Compare.After.ID}}">{{if .Compare.After.ScanEnd.IsZero}}{{.Compare.After.ReportID}}{{else}}{{.Compare.After.ScanEnd.Format "2006-01-02 15:04"}}{{end}}</a><small>H {{.Compare.After.CountHigh}} · M {{.Compare.After.CountMedium}} · {{.Compare.After.FindingCount}} findings</small></div>
+  </div>
+</section>
+
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">NEW</p><h2>{{len .Compare.New}} new findings</h2></div><span class="badge badge-new">new</span></div>
+  {{template "compareFindings" .Compare.New}}
+</section>
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">RECURRING</p><h2>{{len .Compare.Recurring}} recurring findings</h2></div><span class="badge badge-recurring">recurring</span></div>
+  {{template "compareFindings" .Compare.Recurring}}
+</section>
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">RESOLVED</p><h2>{{len .Compare.Resolved}} resolved findings</h2></div><span class="badge badge-resolved">resolved</span></div>
+  {{template "compareFindings" .Compare.Resolved}}
+</section>
+{{template "foot" .}}

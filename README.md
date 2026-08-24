@@ -67,13 +67,15 @@ The preview and reconciler use the same deterministic network plan:
 1. Only IPv4 is accepted.
 2. A bare address is stored as `/32`; for example, `192.168.10.0` means
    `192.168.10.0/32`, not `/24`.
-3. Prefixes broader than `/24` are split into `/24` entries.
-4. Duplicate and overlapping coverage is scanned once.
-5. RFC1918 space is grouped as `PrivateIP`; public global-unicast space is
+3. An inclusive `start-end` IPv4 range such as `192.168.20.10-192.168.20.30` is
+   converted into the smallest exact set of CIDRs before planning.
+4. Prefixes broader than `/24` are split into `/24` entries.
+5. Duplicate and overlapping coverage is scanned once.
+6. RFC1918 space is grouped as `PrivateIP`; public global-unicast space is
    grouped as `WAN`.
-6. Private and WAN entries are never mixed in the same target.
-7. A target can contain multiple prefixes, but never more than 4,095 unique IPs.
-8. Special-use ranges such as loopback, link-local, CGNAT, documentation,
+7. Private and WAN entries are never mixed in the same target.
+8. A target can contain multiple prefixes, but never more than 4,095 unique IPs.
+9. Special-use ranges such as loopback, link-local, CGNAT, documentation,
    multicast, and reserved space are rejected.
 
 Single hosts remain canonical `/32` values in SQLite. They are sent to current
@@ -96,7 +98,9 @@ address becomes one WAN `/32`.
 
 Every task for the customer uses the same weekly schedule. New customers receive
 a cryptographically random minute and weekday from the global policy, which
-defaults to Monday through Thursday, 07:00–15:00 in `Europe/Vienna`.
+defaults to Monday through Thursday, 07:00–15:00 in `Europe/Vienna`. The policy
+accepts any combination of weekdays and any start/end time within one day;
+overnight operation is represented with two same-day windows.
 
 ## Architecture
 
@@ -194,17 +198,13 @@ Do not commit either file. The app password bootstraps the local account only
 when the database is new; changing the file later does not rotate an existing
 account.
 
-### 3. Start the complete stack and set the Greenbone admin password
+### 3. Start the complete stack
 
 Pull first so image-download failures are separate from service startup:
 
 ```bash
 docker compose -f deploy/greenbone-compose.yaml pull
 docker compose -f deploy/greenbone-compose.yaml up -d
-GMP_PASSWORD="$(cat secrets/gmp_password)"
-docker compose -f deploy/greenbone-compose.yaml exec -u gvmd gvmd \
-  gvmd --user=admin --new-password="$GMP_PASSWORD"
-unset GMP_PASSWORD
 ```
 
 PowerShell:
@@ -212,16 +212,19 @@ PowerShell:
 ```powershell
 docker compose -f deploy/greenbone-compose.yaml pull
 docker compose -f deploy/greenbone-compose.yaml up -d
-$GMPPassword = Get-Content -Raw secrets/gmp_password
-docker compose -f deploy/greenbone-compose.yaml exec -u gvmd gvmd `
-  gvmd --user=admin --new-password=$GMPPassword
-Remove-Variable GMPPassword
 ```
 
-Greenbone creates an insecure `admin`/`admin` account initially. The password
-change must exactly match `secrets/gmp_password` or GMP authentication will fail.
-Passwords containing shell metacharacters must be passed with appropriate shell
-quoting.
+The one-shot `gvmd-user-init` service runs as the Linux `gvmd` user and applies
+`secrets/gmp_password` to the Greenbone account before `openvasconf` starts. A
+database or password-update error fails the initializer and blocks dependent
+services instead of silently starting with mismatched credentials.
+
+After changing `secrets/gmp_password`, recreate the initializer and application:
+
+```bash
+docker compose -f deploy/greenbone-compose.yaml up -d --force-recreate \
+  gvmd-user-init openvasconf
+```
 
 This starts Greenbone and `openvasconf` together. For a repeatable app version,
 set `OPENVASCONF_IMAGE` to the verified digest from the `image-digest` workflow
@@ -283,8 +286,8 @@ curl --fail http://127.0.0.1:8080/health/ready
 3. Review the global scanner, scan configuration, and port list. If they are
    blank, wait for feed import and try again.
 4. Set the IANA timezone used for new customers.
-5. Choose the allowed weekdays and time window. The allowed outer limits are
-   Monday–Thursday and 07:00–15:00.
+5. Choose the allowed weekdays and time window. Any weekday combination and any
+   same-day start/end time between 00:00 and 23:59 is accepted.
 6. Save the global defaults.
 
 Changing the global schedule policy does not silently move existing customer
@@ -300,10 +303,11 @@ appropriate; use **Randomize schedule** or edit the customer to move one.
    to 64 ASCII letters, digits, hyphens, and underscores.
 3. Optionally add a description of up to 500 characters and up to 10 normalized
    tags of 30 characters each.
-4. Enter one IPv4 address or CIDR per line. Comma-separated input is also
-   accepted. A `.txt` or `.csv` file can populate the field in the browser.
-5. Keep the randomized weekly slot or choose a specific Monday–Thursday time
-   between 07:00 and 15:00.
+4. Enter one IPv4 address, CIDR, or inclusive `start-end` range per line.
+   Comma-separated input is also accepted. A `.txt` or `.csv` file can populate
+   the field in the browser. Ranges are converted to the smallest exact set of
+   CIDRs.
+5. Keep the randomized weekly slot or choose any weekday and time of day.
 6. Keep the global scanner/config/port-list values or select customer overrides.
 7. Select **Review generated changes**, inspect normalization, overlap warnings,
    target utilization, and the before/after summary.
@@ -423,11 +427,22 @@ Duration values use Go syntax such as `30s`, `1m`, or `12h`.
 | `OPENVASCONF_SESSION_LIFETIME` | `12h` | Local admin session lifetime. |
 | `OPENVASCONF_SECURE_COOKIES` | `false` | Always mark session and CSRF cookies `Secure`. |
 | `OPENVASCONF_TRUST_PROXY_TLS` | `false` | Trust `X-Forwarded-Proto: https` when deciding whether cookies are secure. |
+| `OPENVASCONF_REPORT_SYNC_INTERVAL` | `2m` | Completed-report discovery and import interval. |
+| `OPENVASCONF_REPORT_MAX_XML_BYTES` | `67108864` | Maximum accepted report XML size in bytes. |
+| `OPENVASCONF_REPORT_MAX_FINDINGS` | `50000` | Maximum findings imported from one report. |
+| `OPENVASCONF_REPORT_IMPORT_CONCURRENCY` | `1` | Concurrent report imports. |
+| `OPENVASCONF_EXPORT_MAX_ROWS` | `100000` | Maximum finding rows in one export. |
+| `OPENVASCONF_EXPORT_MAX_BYTES` | `52428800` | Maximum export response size in bytes. |
 | `OPENVASCONF_PORT` | `8080` | Compose-only host port substitution; it is not read by the Go process. |
 
 File-based secrets take precedence over direct values. The admin password must
 contain at least 12 characters. All configured durations must be positive, and
 the timezone must be a valid IANA name.
+
+Run `openvasconf validate-config` to verify the same configuration and secret
+references used at startup without starting the HTTP server or connecting to
+SQLite or Greenbone. It prints every discovered problem, never prints secret
+values, exits `0` when the configuration is valid, and exits `1` otherwise.
 
 The single deployment file exposes the commonly changed username, timezone,
 port, and secure-cookie settings. Set additional supported variables through a
@@ -447,6 +462,35 @@ docker compose -f deploy/greenbone-compose.yaml logs --tail=200 gvmd
 Application logs are structured JSON on stdout. The web UI adds live GMP
 latency, feed version/age, active task state, latest report severity, per-resource
 drift, and reconciliation history.
+
+Every authenticated page carries a system-health strip summarizing database,
+Greenbone, feed, reconciliation, and report-synchronization state. Green means
+all components healthy, amber means the service is usable but a component is
+stale or degraded, and red means the database or Greenbone is unavailable. The
+strip expands to per-component details, check timestamps, and recovery guidance.
+
+Running tasks expose a confirmation-guarded **Stop scan** action on the customer
+page. After the GMP stop request is sent, the displayed state keeps coming from
+Greenbone polling; the stop is only confirmed once Greenbone reports it.
+
+### Scan reports
+
+`openvasconf` periodically discovers completed Greenbone reports for managed
+tasks and imports normalized, immutable snapshots (findings, severities, and
+metadata); raw report XML is discarded after parsing and never stored. Imports
+are transactional and idempotent per Greenbone report ID, with bounded retries
+for failures.
+
+The **Reports** pages show per-scan severity distribution, finding counts, and
+severity trends, and classify findings as new, recurring, or resolved against
+the previous snapshot of the same customer. Any two snapshots of one customer
+can be compared explicitly. Each finding can carry an operator annotation —
+false positive or accepted risk with justification and optional expiry, plus
+remediation owner, status, and due date — which survives across later scans.
+Severity-based remediation SLAs (configurable in Greenbone settings) derive due
+dates from a finding's first-seen scan, and expired risk acceptances return to
+active automatically. Filtered findings can be exported as CSV, JSON, PDF, or
+SARIF; SARIF uses the stable finding fingerprints as result identity.
 
 Authenticated JSON endpoints used by the web UI are:
 
@@ -736,17 +780,18 @@ The workflows never use Greenbone credentials or contact a live GMP socket.
 
 ## Current scope and limitations
 
-- IPv4 only; IPv6 is rejected.
+- IPv4 only; IPv6 is rejected, and IPv6 ranges are not supported.
 - One local administrator; no password-change UI, RBAC, SSO, or customer portal.
 - One weekly schedule per customer; all that customer's tasks share the slot.
-- Allowed schedule policy is constrained to Monday–Thursday, 07:00–15:00.
+- Schedule windows must start and end on the same day; overnight operation is
+  represented with two same-day windows.
 - Greenbone objects move to trash, but locally deleted customers have no restore
   UI in this version.
 - Import/export carries desired configuration, not secrets, ownership history,
   scan reports, or complete disaster-recovery state.
 - The JSON routes support the web interface and are not a stable public API.
-- The tool configures and starts tasks; report analysis and remediation workflow
-  remain in Greenbone.
+- Greenbone remains the scanner and the authoritative raw-report source;
+  `openvasconf` stores normalized report snapshots only, not raw report XML.
 - Greenbone's Community Container deployment is a test environment, not a
   production architecture.
 

@@ -11,15 +11,17 @@ import (
 )
 
 const (
-	Monday         = 1
-	Thursday       = 4
-	EarliestMinute = 7 * 60
-	LatestMinute   = 15 * 60
+	Monday = 1
+	Sunday = 7
+	// EarliestMinute and LatestMinute bound a same-day schedule window.
+	// Overnight operation is represented as two separate windows.
+	EarliestMinute = 0
+	LatestMinute   = 23*60 + 59
 )
 
 func RandomSchedule(random io.Reader) (weekday, minute int, err error) {
 	return RandomScheduleWithPolicy(random, SchedulePolicy{
-		Weekdays:    []int{Monday, 2, 3, Thursday},
+		Weekdays:    []int{Monday, 2, 3, 4, 5, 6, Sunday},
 		StartMinute: EarliestMinute,
 		EndMinute:   LatestMinute,
 	})
@@ -49,13 +51,13 @@ func RandomScheduleWithPolicy(
 }
 
 func ValidateSchedulePolicy(policy SchedulePolicy) error {
-	if len(policy.Weekdays) == 0 || len(policy.Weekdays) > Thursday-Monday+1 {
+	if len(policy.Weekdays) == 0 || len(policy.Weekdays) > Sunday-Monday+1 {
 		return errors.New("customer: select at least one allowed weekday")
 	}
 	seen := make(map[int]struct{}, len(policy.Weekdays))
 	for _, weekday := range policy.Weekdays {
-		if weekday < Monday || weekday > Thursday {
-			return fmt.Errorf("customer: weekday %d is outside Monday through Thursday", weekday)
+		if weekday < Monday || weekday > Sunday {
+			return fmt.Errorf("customer: weekday %d is outside Monday through Sunday", weekday)
 		}
 		if _, duplicate := seen[weekday]; duplicate {
 			return fmt.Errorf("customer: weekday %d is duplicated", weekday)
@@ -65,7 +67,7 @@ func ValidateSchedulePolicy(policy SchedulePolicy) error {
 	if policy.StartMinute < EarliestMinute || policy.EndMinute > LatestMinute ||
 		policy.StartMinute > policy.EndMinute {
 		return fmt.Errorf(
-			"customer: schedule window must remain between %s and %s",
+			"customer: schedule window must stay within one day between %s and %s",
 			MinuteTime(EarliestMinute),
 			MinuteTime(LatestMinute),
 		)
@@ -116,6 +118,9 @@ func WeekdayName(weekday int) string {
 		2: "Tuesday",
 		3: "Wednesday",
 		4: "Thursday",
+		5: "Friday",
+		6: "Saturday",
+		7: "Sunday",
 	}
 	return names[weekday]
 }

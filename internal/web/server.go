@@ -7,6 +7,8 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"openvasconf/internal/customer"
@@ -31,6 +33,14 @@ type Repository interface {
 	ReconcileRuns(ctx context.Context, customerID string, limit int) ([]store.ReconcileRun, error)
 	ApplyImport(ctx context.Context, settings customer.Settings, customers []customer.Customer) error
 	AuditEvents(ctx context.Context, limit int) ([]store.AuditEvent, error)
+	ListReportSnapshots(ctx context.Context, customerID string, limit int) ([]store.ReportSnapshot, error)
+	ReportSnapshot(ctx context.Context, id int64) (store.ReportSnapshot, error)
+	ReportFindings(ctx context.Context, snapshotID int64) ([]store.FindingSnapshot, error)
+	PreviousImportedSnapshot(ctx context.Context, snapshot store.ReportSnapshot) (store.ReportSnapshot, error)
+	ReportTrend(ctx context.Context, customerID string, limit int) ([]store.ReportSnapshot, error)
+	FirstSeen(ctx context.Context, customerID string, fingerprints []string) (map[string]time.Time, error)
+	UpsertAnnotation(ctx context.Context, annotation store.FindingAnnotation) error
+	AnnotationsForCustomer(ctx context.Context, customerID string) (map[string]store.FindingAnnotation, error)
 }
 
 type Authenticator interface {
@@ -53,22 +63,36 @@ type Options struct {
 	Auth                Authenticator
 	Greenbone           Greenbone
 	Syncer              Syncer
+	Reports             reportHealth
 	Logger              *slog.Logger
 	SecureCookies       bool
 	TrustProxyTLSHeader bool
+	// Export limits; zero values select the defaults (100k rows, 50MB).
+	ExportMaxRows  int
+	ExportMaxBytes int64
 }
+
+const (
+	defaultExportMaxRows  = 100000
+	defaultExportMaxBytes = 50 << 20
+)
 
 type Server struct {
 	repository          Repository
 	auth                Authenticator
 	greenbone           Greenbone
 	syncer              Syncer
+	reports             reportHealth
 	logger              *slog.Logger
 	templates           *template.Template
 	secureCookies       bool
 	trustProxyTLSHeader bool
+	exportMaxRows       int
+	exportMaxBytes      int64
 	loginLimiter        *loginLimiter
 	previewKey          [32]byte
+	healthMu            sync.Mutex
+	healthCache         *healthStrip
 }
 
 func New(options Options) (*Server, error) {
@@ -97,6 +121,15 @@ func New(options Options) (*Server, error) {
 			}
 			return int(value * 100 / total)
 		},
+		"taskActive": func(status string) bool {
+			switch strings.ToLower(status) {
+			case "running", "requested", "queued", "processing":
+				return true
+			}
+			return false
+		},
+		"severityClass":    severityClass,
+		"importStateClass": importStateClass,
 		"nextScan": func(value customer.Customer) string {
 			next, nextErr := value.NextSchedule(time.Now())
 			if nextErr != nil {
@@ -132,15 +165,26 @@ func New(options Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	exportMaxRows := options.ExportMaxRows
+	if exportMaxRows <= 0 {
+		exportMaxRows = defaultExportMaxRows
+	}
+	exportMaxBytes := options.ExportMaxBytes
+	if exportMaxBytes <= 0 {
+		exportMaxBytes = defaultExportMaxBytes
+	}
 	return &Server{
 		repository:          options.Repository,
 		auth:                options.Auth,
 		greenbone:           options.Greenbone,
 		syncer:              options.Syncer,
+		reports:             options.Reports,
 		logger:              options.Logger,
 		templates:           templates,
 		secureCookies:       options.SecureCookies,
 		trustProxyTLSHeader: options.TrustProxyTLSHeader,
+		exportMaxRows:       exportMaxRows,
+		exportMaxBytes:      exportMaxBytes,
 		loginLimiter:        newLoginLimiter(),
 		previewKey:          previewKey,
 	}, nil
@@ -184,6 +228,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/customers/{id}/progress", s.requireAuth(http.HandlerFunc(s.apiCustomerProgress)))
 	mux.Handle("GET /api/customers/{id}/drift", s.requireAuth(http.HandlerFunc(s.apiCustomerDrift)))
 	mux.Handle("POST /customers/{id}/tasks/{kind}/{class}/{sequence}/start", s.requireAuth(http.HandlerFunc(s.startScan)))
+	mux.Handle("POST /customers/{id}/tasks/{kind}/{class}/{sequence}/stop", s.requireAuth(http.HandlerFunc(s.stopScan)))
+	mux.Handle("GET /reports", s.requireAuth(http.HandlerFunc(s.reportsList)))
+	mux.Handle("POST /reports/refresh", s.requireAuth(http.HandlerFunc(s.reportsRefresh)))
+	mux.Handle("GET /reports/compare", s.requireAuth(http.HandlerFunc(s.reportCompare)))
+	mux.Handle("GET /reports/{id}", s.requireAuth(http.HandlerFunc(s.reportDetail)))
+	mux.Handle("GET /reports/{id}/export", s.requireAuth(http.HandlerFunc(s.reportExport)))
+	mux.Handle("POST /reports/{id}/findings/annotate", s.requireAuth(http.HandlerFunc(s.reportAnnotate)))
 
 	return s.securityHeaders(s.csrf(mux))
 }

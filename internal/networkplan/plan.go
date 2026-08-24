@@ -134,35 +134,37 @@ func Analyze(input Input) (Analysis, error) {
 	diagnostics := make([]Diagnostic, 0)
 	seen := make(map[netip.Prefix]string, len(input.Networks))
 	for _, raw := range input.Networks {
-		prefix, err := Parse(raw)
+		expanded, err := Expand(raw)
 		if err != nil {
 			return Analysis{}, err
 		}
-		class, err := classify(prefix)
-		if err != nil {
-			return Analysis{}, err
-		}
-		if related, duplicate := seen[prefix]; duplicate {
-			diagnostics = append(diagnostics, Diagnostic{
-				Kind:    "duplicate",
-				Input:   raw,
-				Related: related,
-				Message: fmt.Sprintf("%s duplicates %s and will be scanned once", raw, related),
-			})
-			continue
-		}
-		for _, existing := range canonical {
-			if prefixesOverlap(prefix, existing.Prefix) {
-				diagnostics = append(diagnostics, Diagnostic{
-					Kind:    "overlap",
-					Input:   raw,
-					Related: existing.Input,
-					Message: fmt.Sprintf("%s overlaps %s; covered addresses will be scanned once", raw, existing.Input),
-				})
+		for _, prefix := range expanded {
+			class, err := classify(prefix)
+			if err != nil {
+				return Analysis{}, err
 			}
+			if related, duplicate := seen[prefix]; duplicate {
+				diagnostics = append(diagnostics, Diagnostic{
+					Kind:    "duplicate",
+					Input:   raw,
+					Related: related,
+					Message: fmt.Sprintf("%s duplicates %s and will be scanned once", raw, related),
+				})
+				continue
+			}
+			for _, existing := range canonical {
+				if prefixesOverlap(prefix, existing.Prefix) {
+					diagnostics = append(diagnostics, Diagnostic{
+						Kind:    "overlap",
+						Input:   raw,
+						Related: existing.Input,
+						Message: fmt.Sprintf("%s overlaps %s; covered addresses will be scanned once", raw, existing.Input),
+					})
+				}
+			}
+			seen[prefix] = raw
+			canonical = append(canonical, CanonicalInput{Input: raw, Prefix: prefix, Class: class})
 		}
-		seen[prefix] = raw
-		canonical = append(canonical, CanonicalInput{Input: raw, Prefix: prefix, Class: class})
 	}
 	var total uint64
 	for _, target := range plan.Targets {
@@ -198,6 +200,68 @@ func Parse(input string) (netip.Prefix, error) {
 	return prefix.Masked(), nil
 }
 
+// Expand parses a single network input into its canonical set of CIDR
+// prefixes. Besides plain addresses and CIDRs it accepts an inclusive IPv4
+// range written as "start-end" and converts it into the smallest exact set
+// of CIDRs.
+func Expand(input string) ([]netip.Prefix, error) {
+	raw := strings.TrimSpace(input)
+	if raw == "" {
+		return nil, errors.New("networkplan: network is empty")
+	}
+	if strings.Contains(raw, "-") {
+		return parseRange(raw)
+	}
+	prefix, err := Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	return []netip.Prefix{prefix}, nil
+}
+
+func parseRange(raw string) ([]netip.Prefix, error) {
+	parts := strings.Split(raw, "-")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("networkplan: invalid range %q", raw)
+	}
+	start, err := netip.ParseAddr(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return nil, fmt.Errorf("networkplan: parsing range start %q: %w", raw, err)
+	}
+	end, err := netip.ParseAddr(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return nil, fmt.Errorf("networkplan: parsing range end %q: %w", raw, err)
+	}
+	if !start.Is4() || !end.Is4() {
+		return nil, fmt.Errorf("networkplan: range %q is not ipv4", raw)
+	}
+	startNumber := uint64(ipv4Number(start))
+	endNumber := uint64(ipv4Number(end))
+	if startNumber > endNumber {
+		return nil, fmt.Errorf("networkplan: range %q starts after its end", raw)
+	}
+
+	prefixes := make([]netip.Prefix, 0, 8)
+	for startNumber <= endNumber {
+		remaining := endNumber - startNumber + 1
+		block := uint64(1)
+		// Grow the block while it stays aligned and within the range.
+		for block<<1 <= remaining && startNumber%(block<<1) == 0 && block < 1<<32 {
+			block <<= 1
+		}
+		bits := 32
+		for size := block; size > 1; size >>= 1 {
+			bits--
+		}
+		prefixes = append(prefixes, netip.PrefixFrom(ipv4Address(uint32(startNumber)), bits))
+		if block == 1<<32 {
+			break
+		}
+		startNumber += block
+	}
+	return prefixes, nil
+}
+
 func SafeName(name string) string {
 	var builder strings.Builder
 	lastSeparator := false
@@ -226,21 +290,23 @@ func SafeName(name string) string {
 func parseAndExpand(inputs []string) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(inputs))
 	for _, input := range inputs {
-		prefix, err := Parse(input)
+		expanded, err := Expand(input)
 		if err != nil {
 			return nil, err
 		}
-		expanded, err := split(prefix)
-		if err != nil {
-			return nil, err
+		for _, prefix := range expanded {
+			splitted, err := split(prefix)
+			if err != nil {
+				return nil, err
+			}
+			if len(prefixes)+len(splitted) > maxExpandedPrefixes {
+				return nil, fmt.Errorf(
+					"networkplan: expanded network count exceeds safety limit %d",
+					maxExpandedPrefixes,
+				)
+			}
+			prefixes = append(prefixes, splitted...)
 		}
-		if len(prefixes)+len(expanded) > maxExpandedPrefixes {
-			return nil, fmt.Errorf(
-				"networkplan: expanded network count exceeds safety limit %d",
-				maxExpandedPrefixes,
-			)
-		}
-		prefixes = append(prefixes, expanded...)
 	}
 	return prefixes, nil
 }

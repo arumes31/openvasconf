@@ -24,3 +24,4 @@ image-digest.txt
 Thumbs.db
 /.idea/
 /.vscode/
+/graphify-out/

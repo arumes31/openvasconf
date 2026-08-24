@@ -15,6 +15,7 @@
   <a class="brand" href="/"><span class="brand-mark">OV</span><span>openvasconf</span></a>
   <nav aria-label="Main navigation">
     <a href="/">Operations</a>
+    <a href="/reports">Reports</a>
     <a href="/customers/new">Add customer</a>
     <a href="/import">Portability</a>
     <a href="/settings">Greenbone</a>
@@ -26,6 +27,15 @@
 </header>
 {{end}}
 <main class="shell">
+{{if and .Authenticated .Health}}
+<section class="health-strip health-{{.Health.Level}}" aria-label="System health">
+  <span class="health-light" aria-hidden="true"></span>
+  <strong>{{.Health.Summary}}</strong>
+  <details class="health-details"><summary>Components · checked {{.Health.CheckedAt.Format "15:04:05"}}</summary>
+    <ul class="health-list">{{range .Health.Components}}<li><span class="status health-state-{{.State}}">{{.State}}</span><strong>{{.Name}}</strong><span>{{.Detail}}</span>{{if .Guidance}}<small>{{.Guidance}}</small>{{end}}{{if .Link}}<a href="{{.Link}}">Details →</a>{{end}}</li>{{end}}</ul>
+  </details>
+</section>
+{{end}}
 {{if .Error}}<div class="alert alert-error" role="alert"><span>FAULT</span>{{.Error}}</div>{{end}}
 {{if .Notice}}<div class="alert"><span>INFO</span>{{.Notice}}</div>{{end}}
 {{if .GreenboneError}}<div class="alert alert-warn" role="alert"><span>GMP</span>{{.GreenboneError}}</div>{{end}}

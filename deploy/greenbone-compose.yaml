@@ -122,6 +122,34 @@ services:
       report-formats:
         condition: service_healthy
 
+  # Apply the GMP password before starting services that authenticate to gvmd.
+  gvmd-user-init:
+    image: registry.community.greenbone.net/community/gvmd:stable
+    user: "gvmd"
+    environment:
+      GMP_USERNAME: "${OPENVASCONF_GMP_USERNAME:-admin}"
+    secrets:
+      - source: openvasconf_gmp_password
+        target: gmp_password
+    volumes:
+      - gvmd_data_vol:/var/lib/gvm
+      - psql_data_vol:/var/lib/postgresql
+      - gvmd_socket_vol:/run/gvmd
+      - psql_socket_vol:/var/run/postgresql
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        GMP_PASSWORD="$$(tr -d '\r\n' < /run/secrets/gmp_password)"
+        if [ -z "$${GMP_PASSWORD}" ]; then
+          echo "GMP password secret is empty" >&2
+          exit 1
+        fi
+        gvmd --user="$${GMP_USERNAME}" --new-password="$${GMP_PASSWORD}"
+    depends_on:
+      gvmd:
+        condition: service_healthy
+
   gsa:
     image: registry.community.greenbone.net/community/gsa:stable-slim
     environment:
@@ -329,8 +357,8 @@ services:
       - openvasconf_data:/data
       - gvmd_socket_vol:/run/gvmd
     depends_on:
-      gvmd:
-        condition: service_started
+      gvmd-user-init:
+        condition: service_completed_successfully
 
 secrets:
   openvasconf_admin_password:

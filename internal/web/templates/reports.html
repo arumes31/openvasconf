@@ -1,0 +1,31 @@
+{{template "head" .}}
+<section class="hero-row">
+  <div><p class="eyebrow">NORMALIZED SNAPSHOTS</p><h1>Scan reports</h1></div>
+  <div class="button-row"><form method="post" action="/reports/refresh"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="primary" type="submit">Refresh reports <span>↻</span></button></form></div>
+</section>
+
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">IMPORTED REPORTS</p><h2>{{len .Reports}} snapshots</h2></div></div>
+  <form method="get" action="/reports" class="filter-bar">
+    <label>Customer<select name="customer"><option value="">All customers</option>{{range .Customers}}<option value="{{.ID}}" {{if selected $.ReportFilter.Customer .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+    <button class="secondary" type="submit">Apply</button>
+  </form>
+  {{if .Reports}}
+  <div class="table-scroll"><table>
+    <thead><tr><th>Customer</th><th>Scan finished</th><th>Task</th><th>Status</th><th>Max severity</th><th>Findings</th><th>Import</th><th></th></tr></thead>
+    <tbody>{{range .Reports}}
+      <tr>
+        <td><strong>{{if .CustomerName}}{{.CustomerName}}{{else}}Unmapped{{end}}</strong><small><code>{{.ReportID}}</code></small></td>
+        <td>{{if .ScanEnd.IsZero}}—{{else}}{{.ScanEnd.Format "2006-01-02 15:04"}}{{end}}</td>
+        <td>{{.TaskName}}</td>
+        <td>{{.Status}}</td>
+        <td><strong class="threat-{{if ge .SeverityMax 7.0}}high{{else if ge .SeverityMax 4.0}}medium{{else}}low{{end}}">{{printf "%.1f" .SeverityMax}}</strong></td>
+        <td><strong>{{.FindingCount}}</strong><small>H {{.CountHigh}} · M {{.CountMedium}} · L {{.CountLow}} · Log {{.CountLog}} · FP {{.CountFalsePos}}</small></td>
+        <td><span class="status status-{{importStateClass .ImportState}}">{{.ImportState}}</span>{{if .ImportDiagnostic}}<small title="{{.ImportDiagnostic}}">attempts {{.ImportAttempts}}</small>{{end}}</td>
+        <td><div class="row-actions"><a href="/reports/{{.ID}}">Inspect →</a><a href="/reports/compare?b={{.ID}}">Compare</a></div></td>
+      </tr>
+    {{end}}</tbody>
+  </table></div>
+  {{else}}<div class="empty-state"><span>NO REPORT SNAPSHOTS</span><p>Reports are imported automatically after managed scans finish. Use Refresh reports to synchronize now.</p></div>{{end}}
+</section>
+{{template "foot" .}}

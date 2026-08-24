@@ -1,0 +1,106 @@
+{{template "head" .}}
+<section class="hero-row">
+  <div><p class="eyebrow">REPORT SNAPSHOT</p><h1>{{if .Report.TaskName}}{{.Report.TaskName}}{{else}}Report{{end}}</h1></div>
+  <div class="button-row">{{if .PreviousReportID}}<a class="secondary" href="/reports/compare?a={{.PreviousReportID}}&b={{.Report.ID}}">Compare with previous</a>{{end}}<a class="secondary" href="/reports">All reports</a></div>
+</section>
+
+<section class="panel">
+  <div class="section-heading"><div><p class="eyebrow">SCAN METADATA</p><h2>{{if .Report.CustomerName}}{{.Report.CustomerName}}{{else}}Unmapped{{end}}</h2></div><span class="status status-{{importStateClass .Report.ImportState}}">{{.Report.ImportState}}</span></div>
+  <div class="sev-grid">
+    <div class="sev-card sev-high"><span>High</span><strong>{{.Report.CountHigh}}</strong></div>
+    <div class="sev-card sev-medium"><span>Medium</span><strong>{{.Report.CountMedium}}</strong></div>
+    <div class="sev-card sev-low"><span>Low</span><strong>{{.Report.CountLow}}</strong></div>
+    <div class="sev-card sev-log"><span>Log</span><strong>{{.Report.CountLog}}</strong></div>
+    <div class="sev-card sev-fp"><span>False positive</span><strong>{{.Report.CountFalsePos}}</strong></div>
+  </div>
+  <div class="report-meta">
+    <div><span>Report ID</span><code>{{.Report.ReportID}}</code></div>
+    <div><span>Task</span>{{.Report.TaskName}}</div>
+    <div><span>Scan window</span>{{if .Report.ScanStart.IsZero}}—{{else}}{{.Report.ScanStart.Format "2006-01-02 15:04"}}{{end}} → {{if .Report.ScanEnd.IsZero}}—{{else}}{{.Report.ScanEnd.Format "2006-01-02 15:04"}}{{end}}</div>
+    <div><span>Status</span>{{.Report.Status}}</div>
+    <div><span>Max severity</span><strong class="threat-{{if ge .Report.SeverityMax 7.0}}high{{else if ge .Report.SeverityMax 4.0}}medium{{else}}low{{end}}">{{printf "%.1f" .Report.SeverityMax}}</strong></div>
+    {{if .Report.ImportedAt}}<div><span>Imported</span>{{.Report.ImportedAt.Format "2006-01-02 15:04"}}</div>{{end}}
+    {{if .Report.ImportDiagnostic}}<div><span>Import diagnostic</span><small class="warning-copy">{{.Report.ImportDiagnostic}} (attempts {{.Report.ImportAttempts}})</small></div>{{end}}
+  </div>
+</section>
+
+{{if .Trend}}
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">SEVERITY TREND</p><h2>Last {{len .Trend}} snapshots</h2></div></div>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Scan finished</th><th>High</th><th>Medium</th><th>Low</th><th>Log</th><th>FP</th><th>Max sev</th><th>Findings</th></tr></thead>
+    <tbody>{{range .Trend}}
+      <tr>
+        <td>{{if .Snapshot.ScanEnd.IsZero}}—{{else}}{{.Snapshot.ScanEnd.Format "2006-01-02 15:04"}}{{end}}</td>
+        <td><strong class="threat-high">{{.Snapshot.CountHigh}}</strong><progress max="100" value="{{.HighPct}}"></progress></td>
+        <td>{{.Snapshot.CountMedium}}</td>
+        <td>{{.Snapshot.CountLow}}</td>
+        <td>{{.Snapshot.CountLog}}</td>
+        <td>{{.Snapshot.CountFalsePos}}</td>
+        <td>{{printf "%.1f" .Snapshot.SeverityMax}}</td>
+        <td><strong>{{.Snapshot.FindingCount}}</strong><progress max="100" value="{{.TotalPct}}"></progress></td>
+      </tr>
+    {{end}}</tbody>
+  </table></div>
+</section>
+{{end}}
+
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">FINDINGS</p><h2>{{len .FindingRows}} of {{.Report.FindingCount}} shown</h2></div>
+    <form method="get" action="/reports/{{.Report.ID}}/export" class="export-bar">
+      <input type="hidden" name="severity" value="{{.ReportFilter.Severity}}">
+      <input type="hidden" name="host" value="{{.ReportFilter.Host}}">
+      <input type="hidden" name="port" value="{{.ReportFilter.Port}}">
+      <input type="hidden" name="lifecycle" value="{{.ReportFilter.Lifecycle}}">
+      <input type="hidden" name="disposition" value="{{.ReportFilter.Disposition}}">
+      <input type="hidden" name="owner" value="{{.ReportFilter.Owner}}">
+      <input type="hidden" name="remediation" value="{{.ReportFilter.Remediation}}">
+      <input type="hidden" name="sla" value="{{.ReportFilter.SLA}}">
+      <label>Format<select name="format">{{range $f := (list "csv" "json" "sarif" "pdf")}}<option value="{{$f}}">{{$f}}</option>{{end}}</select></label>
+      <button class="secondary" type="submit">Export</button>
+    </form>
+  </div>
+  <form method="get" action="/reports/{{.Report.ID}}" class="filter-bar filter-bar-wide">
+    <label>Severity<select name="severity"><option value="">All classes</option>{{range $s := (list "high" "medium" "low" "log" "false_positive")}}<option value="{{$s}}" {{if selected $.ReportFilter.Severity $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <label>Host<input type="search" name="host" value="{{.ReportFilter.Host}}" placeholder="10.1.0"></label>
+    <label>Port<input type="search" name="port" value="{{.ReportFilter.Port}}" placeholder="22/tcp"></label>
+    <label>Lifecycle<select name="lifecycle"><option value="">All</option>{{range $s := (list "new" "recurring")}}<option value="{{$s}}" {{if selected $.ReportFilter.Lifecycle $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <label>Disposition<select name="disposition"><option value="">All</option>{{range $s := (list "active" "false_positive" "accepted_risk")}}<option value="{{$s}}" {{if selected $.ReportFilter.Disposition $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <label>Owner<input type="search" name="owner" value="{{.ReportFilter.Owner}}" placeholder="ops-team"></label>
+    <label>Remediation<select name="remediation"><option value="">All</option>{{range $s := (list "open" "in_progress" "resolved" "wont_fix")}}<option value="{{$s}}" {{if selected $.ReportFilter.Remediation $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <label>SLA<select name="sla"><option value="">All</option>{{range $s := (list "on_track" "due_soon" "overdue" "none")}}<option value="{{$s}}" {{if selected $.ReportFilter.SLA $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <button class="secondary" type="submit">Apply</button>
+  </form>
+  {{if .FindingRows}}
+  <div class="table-scroll"><table>
+    <thead><tr><th>Severity</th><th>Host</th><th>Port</th><th>Finding</th><th>State</th><th>SLA</th><th>Annotation</th></tr></thead>
+    <tbody>{{range .FindingRows}}
+      <tr>
+        <td><strong class="threat-{{severityClass .Threat}}">{{printf "%.1f" .Severity}}</strong><small>{{.Threat}} · QOD {{.QOD}}%</small></td>
+        <td><code>{{.Host}}</code></td>
+        <td>{{.Port}}</td>
+        <td><strong>{{.Title}}</strong><small><code>{{.NVTOID}}</code></small><div class="tags">{{range .CVEs}}<span>{{.}}</span>{{end}}</div>{{if .Remediation}}<details><summary>Remediation</summary><p class="remediation">{{.Remediation}}</p></details>{{end}}</td>
+        <td>{{if .Lifecycle}}<span class="badge badge-{{.Lifecycle}}">{{.Lifecycle}}</span>{{end}}<span class="badge badge-{{.Disposition}}">{{.Disposition}}</span><small>{{.RemediationState}}{{if .RemediationOwner}} · {{.RemediationOwner}}{{end}}{{if .DueDate}} · due {{.DueDate.Format "2006-01-02"}}{{end}}</small></td>
+        <td>{{if ne .SLAState "none"}}<span class="badge badge-{{.SLAState}}">{{.SLAState}}</span>{{if .SLADeadline}}<small>{{.SLADeadline.Format "2006-01-02"}}</small>{{end}}{{else}}<small>no SLA</small>{{end}}</td>
+        <td>
+          <details><summary>Annotate</summary>
+            {{$row := .}}
+            <form method="post" action="/reports/{{$.Report.ID}}/findings/annotate" class="annotate-form">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+              <input type="hidden" name="fingerprint" value="{{.Fingerprint}}">
+              <label>Disposition<select name="disposition">{{range $d := (list "active" "false_positive" "accepted_risk")}}<option value="{{$d}}" {{if eq $d $row.Disposition}}selected{{end}}>{{$d}}</option>{{end}}</select></label>
+              <label>Justification<input name="justification" value="{{.Justification}}" maxlength="2000" placeholder="Required for false positive / accepted risk"></label>
+              <label>Expiry (accepted risk)<input type="date" name="expires_at" value="{{if .ExpiresAt}}{{.ExpiresAt.Format "2006-01-02"}}{{end}}"></label>
+              <label>Remediation<select name="remediation_state">{{range $s := (list "open" "in_progress" "resolved" "wont_fix")}}<option value="{{$s}}" {{if eq $s $row.RemediationState}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+              <label>Owner<input name="remediation_owner" value="{{.RemediationOwner}}" maxlength="200" placeholder="ops-team"></label>
+              <label>Due date<input type="date" name="due_date" value="{{if .DueDate}}{{.DueDate.Format "2006-01-02"}}{{end}}"></label>
+              <button class="secondary" type="submit">Save annotation</button>
+            </form>
+          </details>
+        </td>
+      </tr>
+    {{end}}</tbody>
+  </table></div>
+  {{else}}<div class="empty-state"><span>NO MATCHING FINDINGS</span><p>Clear the filters, or wait for a report with detailed results.</p></div>{{end}}
+</section>
+{{template "foot" .}}
