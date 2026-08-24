@@ -38,6 +38,7 @@ jobs:
     permissions:
       actions: read # Let workflow security tools inspect action metadata.
       contents: read
+      id-token: write # Permit the reusable Scorecard job; it is skipped for this release gate.
       security-events: write # Publish zizmor SARIF before release evaluation.
     uses: ./.github/workflows/supply-chain.yml
     with:
