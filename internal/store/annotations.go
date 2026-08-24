@@ -339,10 +339,10 @@ func annotationText(value string, maxLength int) string {
 }
 
 func nullableTimeText(value *time.Time) any {
-	if value == nil {
+	if value == nil || value.IsZero() {
 		return nil
 	}
-	return value.UTC().Format(time.RFC3339Nano)
+	return value.UTC().Format(fixedTimeLayout)
 }
 
 func parseNullableTime(value string) (*time.Time, error) {

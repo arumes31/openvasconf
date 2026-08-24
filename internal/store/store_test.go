@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -165,6 +167,104 @@ func TestStorePersistsAcrossRestart(t *testing.T) {
 	}
 	if restarted.InstallationID != settings.InstallationID || restarted.Timezone != "Europe/Vienna" {
 		t.Errorf("restarted settings = %#v, initial = %#v", restarted, settings)
+	}
+}
+
+func TestScheduleFreedomMigrationPreservesForeignKeyChildren(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	dsn := "file:" + url.PathEscape(filepath.ToSlash(path)) + "?_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	legacy := &Store{db: db}
+	for _, migration := range []struct {
+		version int
+		name    string
+	}{
+		{version: 1, name: "001_initial.sql"},
+		{version: 2, name: "002_operator_features.sql"},
+	} {
+		statement, err := migrationFiles.ReadFile("migrations/" + migration.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := legacy.applyMigration(ctx, migration.version, string(statement)); err != nil {
+			t.Fatalf("applyMigration(%d) error = %v", migration.version, err)
+		}
+	}
+	const storedTime = "2026-08-24T12:00:00Z"
+	for _, statement := range []string{
+		`INSERT INTO settings(singleton, installation_id, timezone, updated_at)
+		 VALUES(1, 'install-upgrade', 'Europe/Vienna', '` + storedTime + `')`,
+		`INSERT INTO customers(id, name, safe_name, schedule_weekday, schedule_minute,
+		 timezone, created_at, updated_at)
+		 VALUES('customer-upgrade', 'upgrade', 'upgrade', 1, 420,
+		 'Europe/Vienna', '` + storedTime + `', '` + storedTime + `')`,
+		`INSERT INTO networks(id, customer_id, input, prefix, class, created_at)
+		 VALUES('network-upgrade', 'customer-upgrade', '10.0.0.1', '10.0.0.1/32',
+		 'PrivateIP', '` + storedTime + `')`,
+		`INSERT INTO managed_resources(customer_id, kind, class, sequence,
+		 ownership_marker, updated_at)
+		 VALUES('customer-upgrade', 'target', 'PrivateIP', 1,
+		 'openvasconf:upgrade', '` + storedTime + `')`,
+		`INSERT INTO reconcile_runs(customer_id, started_at, status, error)
+		 VALUES('customer-upgrade', '` + storedTime + `', 'completed', '')`,
+		`INSERT INTO audit_events(customer_id, action, created_at)
+		 VALUES('customer-upgrade', 'created', '` + storedTime + `')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("seeding legacy database: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(ctx, path, "UTC")
+	if err != nil {
+		t.Fatalf("Open(upgrade) error = %v", err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	for _, table := range []string{"networks", "managed_resources", "reconcile_runs", "audit_events"} {
+		var count int
+		// #nosec G202 -- table comes from the fixed test allowlist above.
+		query := "SELECT COUNT(*) FROM " + table + " WHERE customer_id = 'customer-upgrade'"
+		if err := upgraded.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
+			t.Fatalf("counting %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Errorf("%s rows after upgrade = %d, want 1", table, count)
+		}
+	}
+	settings, err := upgraded.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.SLA != (customer.SLAPolicy{CriticalDays: 7, HighDays: 14, MediumDays: 30, LowDays: 90}) {
+		t.Errorf("upgraded SLA defaults = %#v", settings.SLA)
+	}
+	var foreignKeysEnabled int
+	if err := upgraded.db.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeysEnabled); err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeysEnabled != 1 {
+		t.Errorf("foreign-key enforcement after upgrade = %d, want 1", foreignKeysEnabled)
+	}
+	rows, err := upgraded.db.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("foreign_key_check found a violation after upgrade")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }
 

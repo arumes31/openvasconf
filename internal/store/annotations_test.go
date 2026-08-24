@@ -269,6 +269,18 @@ func TestSettingsSLARoundTrip(t *testing.T) {
 		t.Errorf("updated SLA = %#v", updated.SLA)
 	}
 
+	settings.SLA = customer.SLAPolicy{}
+	if err := store.UpdateSettings(ctx, settings); err != nil {
+		t.Fatalf("UpdateSettings(zero SLA) error = %v", err)
+	}
+	updated, err = store.Settings(ctx)
+	if err != nil {
+		t.Fatalf("Settings(zero SLA) error = %v", err)
+	}
+	if updated.SLA != (customer.SLAPolicy{}) {
+		t.Errorf("zero SLA = %#v, want explicit due-immediately values", updated.SLA)
+	}
+
 	settings.SLA.CriticalDays = -1
 	if err := store.UpdateSettings(ctx, settings); err == nil {
 		t.Error("UpdateSettings(negative SLA) error = nil, want validation error")

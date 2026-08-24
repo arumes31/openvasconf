@@ -12,6 +12,8 @@ import (
 	"openvasconf/internal/gmp"
 )
 
+const maxSLADays = 3650
+
 func (s *Server) settingsPage(response http.ResponseWriter, request *http.Request) {
 	settings, err := s.repository.Settings(request.Context())
 	if err != nil {
@@ -132,6 +134,9 @@ func parseSLAPolicy(request *http.Request) (customer.SLAPolicy, error) {
 		value, err := strconv.Atoi(strings.TrimSpace(request.PostForm.Get(name)))
 		if err != nil || value < 0 {
 			return customer.SLAPolicy{}, errors.New("SLA durations must be non-negative whole days")
+		}
+		if value > maxSLADays {
+			return customer.SLAPolicy{}, fmt.Errorf("SLA durations must not exceed %d days", maxSLADays)
 		}
 		values[index] = value
 	}

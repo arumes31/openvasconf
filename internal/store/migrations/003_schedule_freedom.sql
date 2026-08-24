@@ -1,3 +1,6 @@
+-- openvasconf: foreign_keys_off
+-- The migration runner disables enforcement before opening the transaction,
+-- validates the rebuilt relationships, and restores the prior setting.
 CREATE TABLE customers_new (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL COLLATE NOCASE UNIQUE,

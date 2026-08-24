@@ -192,7 +192,26 @@ func TestReportsListRendersSeededSnapshots(t *testing.T) {
 	t.Parallel()
 
 	app := newReportTestApp(t)
-	seedReportSnapshot(t, app)
+	mapped := seedReportSnapshot(t, app)
+	if err := app.repository.SaveReportSnapshot(t.Context(), store.ReportSnapshot{
+		ReportID: "report-unmapped",
+		TaskID:   "task-unmapped",
+		TaskName: "Unmapped task",
+		ScanEnd:  time.Date(2026, 8, 23, 2, 45, 0, 0, time.UTC),
+		Status:   "Done",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	unmapped, err := app.repository.ListReportSnapshots(t.Context(), "", 10)
+	if err != nil || len(unmapped) != 2 {
+		t.Fatalf("report snapshots = %#v, %v", unmapped, err)
+	}
+	var unmappedID int64
+	for _, snapshot := range unmapped {
+		if snapshot.CustomerID == "" {
+			unmappedID = snapshot.ID
+		}
+	}
 	login(t, app.testWebApp)
 
 	response, err := app.client.Get(app.server.URL + "/reports")
@@ -214,6 +233,15 @@ func TestReportsListRendersSeededSnapshots(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Errorf("reports page misses %q", expected)
 		}
+	}
+	if !strings.Contains(body, "/reports/compare?b="+itoa(mapped.ID)) {
+		t.Error("mapped report is missing its Compare action")
+	}
+	if strings.Contains(body, "/reports/compare?b="+itoa(unmappedID)) {
+		t.Error("unmapped report unexpectedly renders a Compare action")
+	}
+	if !strings.Contains(body, "/reports/"+itoa(unmappedID)) {
+		t.Error("unmapped report is missing its Inspect action")
 	}
 }
 
@@ -591,6 +619,13 @@ func TestSettingsSLAPersist(t *testing.T) {
 	body = readBody(t, response)
 	if !strings.Contains(body, "SLA durations must be non-negative") {
 		t.Errorf("negative SLA not rejected")
+	}
+
+	form["sla_low_days"] = []string{"3651"}
+	response = postForm(t, app.testWebApp, "/settings", form)
+	body = readBody(t, response)
+	if !strings.Contains(body, "SLA durations must not exceed 3650 days") {
+		t.Errorf("excessive SLA not rejected")
 	}
 }
 

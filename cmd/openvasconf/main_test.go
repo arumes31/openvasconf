@@ -49,7 +49,7 @@ func TestValidateConfigReportsAllProblems(t *testing.T) {
 			t.Errorf("output does not report %q:\n%s", expected, text)
 		}
 	}
-	if strings.Contains(text, "short") && strings.Contains(text, "admin password is required") {
+	if strings.Contains(text, "short") {
 		t.Errorf("output leaked a secret value:\n%s", text)
 	}
 }

@@ -7,6 +7,32 @@ import (
 	"time"
 )
 
+func TestStoredTimeTextSortsChronologicallyWithinSecond(t *testing.T) {
+	t.Parallel()
+
+	exact := time.Date(2026, 8, 22, 2, 45, 0, 0, time.UTC)
+	fractional := exact.Add(time.Nanosecond)
+	exactText := reportTimeText(exact)
+	fractionalText := reportTimeText(fractional)
+	if exactText >= fractionalText {
+		t.Fatalf("stored times sort incorrectly: %q >= %q", exactText, fractionalText)
+	}
+	if len(exactText) != len(fractionalText) {
+		t.Fatalf("stored time widths differ: %q and %q", exactText, fractionalText)
+	}
+	parsed, err := parseTime(fractionalText)
+	if err != nil || !parsed.Equal(fractional) {
+		t.Fatalf("parseTime(%q) = %v, %v", fractionalText, parsed, err)
+	}
+	if got := nullableTimeText(&exact); got != exactText {
+		t.Errorf("nullableTimeText() = %#v, want %q", got, exactText)
+	}
+	zero := time.Time{}
+	if got := nullableTimeText(&zero); got != nil {
+		t.Errorf("nullableTimeText(zero) = %#v, want nil", got)
+	}
+}
+
 func testSnapshot(customerID string) ReportSnapshot {
 	return ReportSnapshot{
 		ReportID:     "report-uuid-1",

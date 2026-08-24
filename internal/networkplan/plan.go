@@ -131,6 +131,7 @@ func Analyze(input Input) (Analysis, error) {
 		return Analysis{}, err
 	}
 	canonical := make([]CanonicalInput, 0, len(input.Networks))
+	intervals := make([]analysisInterval, 0, len(input.Networks))
 	diagnostics := make([]Diagnostic, 0)
 	seen := make(map[netip.Prefix]string, len(input.Networks))
 	for _, raw := range input.Networks {
@@ -152,18 +153,49 @@ func Analyze(input Input) (Analysis, error) {
 				})
 				continue
 			}
-			for _, existing := range canonical {
-				if prefixesOverlap(prefix, existing.Prefix) {
-					diagnostics = append(diagnostics, Diagnostic{
-						Kind:    "overlap",
-						Input:   raw,
-						Related: existing.Input,
-						Message: fmt.Sprintf("%s overlaps %s; covered addresses will be scanned once", raw, existing.Input),
-					})
-				}
-			}
 			seen[prefix] = raw
-			canonical = append(canonical, CanonicalInput{Input: raw, Prefix: prefix, Class: class})
+			canonicalInput := CanonicalInput{Input: raw, Prefix: prefix, Class: class}
+			canonical = append(canonical, canonicalInput)
+			start := uint64(ipv4Number(prefix.Addr()))
+			intervals = append(intervals, analysisInterval{
+				CanonicalInput: canonicalInput,
+				Start:          start,
+				End:            start + addressCount(prefix) - 1,
+			})
+		}
+	}
+	slices.SortStableFunc(intervals, func(left, right analysisInterval) int {
+		switch {
+		case left.Start < right.Start:
+			return -1
+		case left.Start > right.Start:
+			return 1
+		case left.End > right.End:
+			return -1
+		case left.End < right.End:
+			return 1
+		default:
+			return 0
+		}
+	})
+	if len(intervals) > 0 {
+		covered := intervals[0]
+		for _, current := range intervals[1:] {
+			if current.Start <= covered.End {
+				diagnostics = append(diagnostics, Diagnostic{
+					Kind:    "overlap",
+					Input:   current.Input,
+					Related: covered.Input,
+					Message: fmt.Sprintf(
+						"%s overlaps %s; covered addresses will be scanned once",
+						current.Input,
+						covered.Input,
+					),
+				})
+			}
+			if current.End > covered.End {
+				covered = current
+			}
 		}
 	}
 	var total uint64
@@ -178,8 +210,10 @@ func Analyze(input Input) (Analysis, error) {
 	}, nil
 }
 
-func prefixesOverlap(left, right netip.Prefix) bool {
-	return left.Contains(right.Addr()) || right.Contains(left.Addr())
+type analysisInterval struct {
+	CanonicalInput
+	Start uint64
+	End   uint64
 }
 
 func Parse(input string) (netip.Prefix, error) {

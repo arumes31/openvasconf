@@ -22,7 +22,7 @@
         <td><strong class="threat-{{if ge .SeverityMax 7.0}}high{{else if ge .SeverityMax 4.0}}medium{{else}}low{{end}}">{{printf "%.1f" .SeverityMax}}</strong></td>
         <td><strong>{{.FindingCount}}</strong><small>H {{.CountHigh}} · M {{.CountMedium}} · L {{.CountLow}} · Log {{.CountLog}} · FP {{.CountFalsePos}}</small></td>
         <td><span class="status status-{{importStateClass .ImportState}}">{{.ImportState}}</span>{{if .ImportDiagnostic}}<small title="{{.ImportDiagnostic}}">attempts {{.ImportAttempts}}</small>{{end}}</td>
-        <td><div class="row-actions"><a href="/reports/{{.ID}}">Inspect →</a><a href="/reports/compare?b={{.ID}}">Compare</a></div></td>
+        <td><div class="row-actions"><a href="/reports/{{.ID}}">Inspect →</a>{{if .CustomerID}}<a href="/reports/compare?b={{.ID}}">Compare</a>{{end}}</div></td>
       </tr>
     {{end}}</tbody>
   </table></div>

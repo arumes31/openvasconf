@@ -142,6 +142,16 @@ func TestSLADeadlineOperatorOverride(t *testing.T) {
 	}
 }
 
+func TestSLADeadlineZeroDaysIsDueImmediately(t *testing.T) {
+	t.Parallel()
+
+	firstSeen := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	deadline, ok := SLADeadline(9.8, firstSeen, nil, customer.SLAPolicy{})
+	if !ok || !deadline.Equal(firstSeen) {
+		t.Fatalf("zero-day SLA deadline = %v, %t; want %v, true", deadline, ok, firstSeen)
+	}
+}
+
 func TestSLAStateAt(t *testing.T) {
 	t.Parallel()
 

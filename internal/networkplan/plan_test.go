@@ -239,6 +239,38 @@ func TestAnalyzeReportsDuplicatesOverlapsAndUniqueAddresses(t *testing.T) {
 	}
 }
 
+func TestAnalyzeOverlapSweepPreservesRelatedInput(t *testing.T) {
+	t.Parallel()
+
+	analysis, err := Analyze(Input{
+		CustomerName: "nested",
+		Networks: []string{
+			"10.0.0.0/25",
+			"10.0.0.0/24",
+			"10.0.0.128/26",
+			"10.0.0.192/26",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	overlaps := make([]Diagnostic, 0, 3)
+	for _, diagnostic := range analysis.Diagnostics {
+		if diagnostic.Kind == "overlap" {
+			overlaps = append(overlaps, diagnostic)
+		}
+	}
+	if len(overlaps) != 3 {
+		t.Fatalf("overlap diagnostics = %#v, want 3", overlaps)
+	}
+	for _, diagnostic := range overlaps {
+		if diagnostic.Related != "10.0.0.0/24" {
+			t.Errorf("overlap related input = %q, want covering /24", diagnostic.Related)
+		}
+	}
+}
+
 func FuzzParse(f *testing.F) {
 	for _, seed := range []string{"10.0.0.0/8", "7.7.7.7", "", "2001:db8::1", "bad"} {
 		f.Add(seed)

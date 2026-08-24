@@ -8,9 +8,9 @@
 //
 //	go test -tags loadtest ./internal/loadtest -run TestLoadBaseline -v
 //
-// The first run writes test-artifacts/loadtest-baseline-<timestamp>.json;
-// later runs should compare their metrics against that baseline and only
-// tighten budgets with measured evidence. The scenario is deterministic
+// The first run writes test-artifacts/loadtest-baseline-<timestamp>.json.
+// Set OPENVASCONF_LOADTEST_BASELINE to that file on later runs to enforce the
+// explicit time and memory regression budgets below. The scenario is deterministic
 // (fixed generated inputs) so runs are comparable. Reduce the scale
 // constants below only together with a note in the artifact.
 package loadtest
@@ -18,6 +18,7 @@ package loadtest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -51,6 +52,9 @@ const (
 	loadFindingsPerSnapshot  = 2000
 	loadPageSampleCustomers  = 10
 	loadAdminPassword        = "loadtest admin password"
+	loadBaselinePathEnv      = "OPENVASCONF_LOADTEST_BASELINE"
+	loadTimeTolerance        = 0.25
+	loadMemoryTolerance      = 0.50
 )
 
 type phaseMetric struct {
@@ -84,6 +88,97 @@ type scaleMetric struct {
 	FindingsPerSnapshot  int `json:"findings_per_snapshot"`
 }
 
+type regressionBudget struct {
+	Name      string
+	Prior     float64
+	Current   float64
+	Tolerance float64
+}
+
+func compareLoadBaseline(prior, current baseline) error {
+	if prior.Scale != current.Scale {
+		return fmt.Errorf("load-test scale changed: prior=%+v current=%+v", prior.Scale, current.Scale)
+	}
+	budgets := []regressionBudget{
+		{
+			Name:      "network planning average",
+			Prior:     prior.NetworkPlanning.AveragePerUnit,
+			Current:   current.NetworkPlanning.AveragePerUnit,
+			Tolerance: loadTimeTolerance,
+		},
+		{
+			Name:      "customer creation average",
+			Prior:     prior.CustomerCreation.AveragePerUnit,
+			Current:   current.CustomerCreation.AveragePerUnit,
+			Tolerance: loadTimeTolerance,
+		},
+		{
+			Name:      "snapshot import average",
+			Prior:     prior.SnapshotImport.AveragePerUnit,
+			Current:   current.SnapshotImport.AveragePerUnit,
+			Tolerance: loadTimeTolerance,
+		},
+		{
+			Name:      "comparison query average",
+			Prior:     prior.ComparisonQuery.AveragePerUnit,
+			Current:   current.ComparisonQuery.AveragePerUnit,
+			Tolerance: loadTimeTolerance,
+		},
+		{
+			Name:      "report page average",
+			Prior:     prior.ReportPageLatency.AveragePerUnit,
+			Current:   current.ReportPageLatency.AveragePerUnit,
+			Tolerance: loadTimeTolerance,
+		},
+		{
+			Name:      "planning heap",
+			Prior:     float64(prior.MemoryPlanning.HeapAllocAfter),
+			Current:   float64(current.MemoryPlanning.HeapAllocAfter),
+			Tolerance: loadMemoryTolerance,
+		},
+		{
+			Name:      "import heap",
+			Prior:     float64(prior.MemoryImport.HeapAllocAfter),
+			Current:   float64(current.MemoryImport.HeapAllocAfter),
+			Tolerance: loadMemoryTolerance,
+		},
+	}
+	regressions := make([]string, 0)
+	for _, budget := range budgets {
+		if budget.Prior <= 0 {
+			continue
+		}
+		limit := budget.Prior * (1 + budget.Tolerance)
+		if budget.Current > limit {
+			regressions = append(regressions, fmt.Sprintf(
+				"%s %.2f exceeds %.2f (prior %.2f + %.0f%%)",
+				budget.Name,
+				budget.Current,
+				limit,
+				budget.Prior,
+				budget.Tolerance*100,
+			))
+		}
+	}
+	if len(regressions) > 0 {
+		return errors.New(strings.Join(regressions, "; "))
+	}
+	return nil
+}
+
+func readLoadBaseline(path string) (baseline, error) {
+	// #nosec G304 -- the operator explicitly configures the local baseline path.
+	encoded, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return baseline{}, fmt.Errorf("reading prior load-test baseline: %w", err)
+	}
+	var prior baseline
+	if err := json.Unmarshal(encoded, &prior); err != nil {
+		return baseline{}, fmt.Errorf("decoding prior load-test baseline: %w", err)
+	}
+	return prior, nil
+}
+
 func heapAlloc() uint64 {
 	runtime.GC()
 	var stats runtime.MemStats
@@ -108,7 +203,7 @@ func loadInputs() []string {
 				second, third&0xFC, second, (third&0xFC)+3,
 			))
 		default:
-			inputs = append(inputs, fmt.Sprintf("10.0.%d.%d", second, index%254+1))
+			inputs = append(inputs, fmt.Sprintf("10.0.%d.%d", second, third))
 		}
 	}
 	return inputs
@@ -207,8 +302,8 @@ func TestLoadBaseline(t *testing.T) {
 	}
 	t.Logf("network planning: %v total, %.2f ms/customer", planningTotal, result.NetworkPlanning.AveragePerUnit)
 
-	// Phase 2: customer creation (one persisted network each; the 2,000-input
-	// set is exercised in-memory in phase 1 to keep the import phase fast).
+	// Phase 2: customer creation with the full 2,000-input workload persisted
+	// for every customer. All remaining phases use this same repository.
 	repository, err := store.Open(ctx, filepath.Join(t.TempDir(), "load.db"), "Europe/Vienna")
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
@@ -216,27 +311,42 @@ func TestLoadBaseline(t *testing.T) {
 	t.Cleanup(func() { _ = repository.Close() })
 
 	customerIDs := make([]string, 0, loadCustomers)
+	networkAnalysis, err := networkplan.Analyze(networkplan.Input{
+		CustomerName: "loadtemplate",
+		Networks:     inputs,
+	})
+	if err != nil {
+		t.Fatalf("networkplan.Analyze(load inputs) error = %v", err)
+	}
+	if len(networkAnalysis.CanonicalInputs) != loadNetworkInputs {
+		t.Fatalf(
+			"canonical network inputs = %d, want %d persisted inputs",
+			len(networkAnalysis.CanonicalInputs),
+			loadNetworkInputs,
+		)
+	}
 	creationStart := time.Now()
 	for index := range loadCustomers {
 		name := fmt.Sprintf("loadcust%04d", index)
-		prefix, err := networkplan.Parse(fmt.Sprintf("10.9.%d.1", index%256))
-		if err != nil {
-			t.Fatalf("networkplan.Parse error = %v", err)
+		customerID := fmt.Sprintf("load-customer-%04d", index)
+		networks := make([]customer.Network, 0, len(networkAnalysis.CanonicalInputs))
+		for networkIndex, canonical := range networkAnalysis.CanonicalInputs {
+			networks = append(networks, customer.Network{
+				ID:         fmt.Sprintf("load-network-%04d-%04d", index, networkIndex),
+				CustomerID: customerID,
+				Input:      canonical.Input,
+				Prefix:     canonical.Prefix.String(),
+				Class:      string(canonical.Class),
+			})
 		}
 		value := customer.Customer{
-			ID:              fmt.Sprintf("load-customer-%04d", index),
+			ID:              customerID,
 			Name:            name,
 			SafeName:        name,
 			ScheduleWeekday: index%7 + 1,
 			ScheduleMinute:  (index * 7) % 1440,
 			Timezone:        "Europe/Vienna",
-			Networks: []customer.Network{{
-				ID:         fmt.Sprintf("load-network-%04d", index),
-				CustomerID: fmt.Sprintf("load-customer-%04d", index),
-				Input:      prefix.String(),
-				Prefix:     prefix.String(),
-				Class:      "PrivateIP",
-			}},
+			Networks:        networks,
 		}
 		if err := repository.CreateCustomer(ctx, value); err != nil {
 			t.Fatalf("CreateCustomer(%d) error = %v", index, err)
@@ -247,7 +357,7 @@ func TestLoadBaseline(t *testing.T) {
 	result.CustomerCreation = phaseMetric{
 		TotalMilliseconds: creationTotal.Milliseconds(),
 		AveragePerUnit:    float64(creationTotal.Microseconds()) / 1000.0 / loadCustomers,
-		Unit:              "customer",
+		Unit:              "customer (2000 persisted networks)",
 	}
 	t.Logf("customer creation: %v total", creationTotal)
 
@@ -364,6 +474,17 @@ func TestLoadBaseline(t *testing.T) {
 		Unit:              "detail page render (2000 findings)",
 	}
 	t.Logf("report page latency: %v total for %d pages", pageTotal, loadPageSampleCustomers)
+
+	if baselinePath := strings.TrimSpace(os.Getenv(loadBaselinePathEnv)); baselinePath != "" {
+		prior, err := readLoadBaseline(baselinePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := compareLoadBaseline(prior, result); err != nil {
+			t.Fatalf("load-test regression against %s: %v", baselinePath, err)
+		}
+		t.Logf("load-test metrics are within tolerance of %s", baselinePath)
+	}
 
 	artifact := filepath.Join(
 		"..", "..", "test-artifacts",

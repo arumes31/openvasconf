@@ -189,8 +189,8 @@ func (s *Syncer) syncLocked(ctx context.Context) error {
 				// gvmd with doomed requests helps nobody.
 				abortMu.Lock()
 				aborted = true
-				abortMu.Unlock()
 				err = importErr
+				abortMu.Unlock()
 			default:
 				abortMu.Lock()
 				failed++
