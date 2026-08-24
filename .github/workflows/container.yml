@@ -165,6 +165,7 @@ jobs:
           format: sarif
           output: trivy-release-amd64.sarif
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           ignore-unfixed: false
           exit-code: '1'
       - name: Scan arm64 release candidate
@@ -179,6 +180,7 @@ jobs:
           format: sarif
           output: trivy-release-arm64.sarif
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           ignore-unfixed: false
           exit-code: '1'
       - name: Upload amd64 release SARIF
