@@ -218,6 +218,56 @@ func TestParseImplicitHost(t *testing.T) {
 	}
 }
 
+func TestParseAllowsInlineComments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "bare address", input: "192.168.10.12 # printer", want: "192.168.10.12/32"},
+		{name: "cidr", input: "192.168.10.99/24 #LAN", want: "192.168.10.0/24"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			prefix, err := Parse(test.input)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if prefix.String() != test.want {
+				t.Errorf("Parse() = %s, want %s", prefix, test.want)
+			}
+		})
+	}
+}
+
+func TestBuildCommentsDoNotChangePlan(t *testing.T) {
+	t.Parallel()
+
+	plain, err := Build(Input{
+		CustomerName: "comments",
+		Networks:     []string{"192.168.10.0/24", "8.8.8.8"},
+	})
+	if err != nil {
+		t.Fatalf("Build(plain) error = %v", err)
+	}
+	commented, err := Build(Input{
+		CustomerName: "comments",
+		Networks:     []string{"192.168.10.0/24 # LAN", "8.8.8.8 # internet"},
+	})
+	if err != nil {
+		t.Fatalf("Build(commented) error = %v", err)
+	}
+	if !slices.EqualFunc(plain.Targets, commented.Targets, func(left, right Target) bool {
+		return left.Name == right.Name && left.Hash == right.Hash
+	}) {
+		t.Errorf("comments changed plan:\nplain=%#v\ncommented=%#v", plain.Targets, commented.Targets)
+	}
+}
+
 func TestAnalyzeReportsDuplicatesOverlapsAndUniqueAddresses(t *testing.T) {
 	t.Parallel()
 	analysis, err := Analyze(Input{
@@ -272,7 +322,15 @@ func TestAnalyzeOverlapSweepPreservesRelatedInput(t *testing.T) {
 }
 
 func FuzzParse(f *testing.F) {
-	for _, seed := range []string{"10.0.0.0/8", "7.7.7.7", "", "2001:db8::1", "bad"} {
+	seeds := []string{
+		"10.0.0.0/8",
+		"7.7.7.7",
+		"192.168.0.0/24 # LAN",
+		"",
+		"2001:db8::1",
+		"bad",
+	}
+	for _, seed := range seeds {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {

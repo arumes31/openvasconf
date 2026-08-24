@@ -217,7 +217,7 @@ type analysisInterval struct {
 }
 
 func Parse(input string) (netip.Prefix, error) {
-	raw := strings.TrimSpace(input)
+	raw := networkPart(input)
 	if raw == "" {
 		return netip.Prefix{}, errors.New("networkplan: network is empty")
 	}
@@ -239,7 +239,7 @@ func Parse(input string) (netip.Prefix, error) {
 // range written as "start-end" and converts it into the smallest exact set
 // of CIDRs.
 func Expand(input string) ([]netip.Prefix, error) {
-	raw := strings.TrimSpace(input)
+	raw := networkPart(input)
 	if raw == "" {
 		return nil, errors.New("networkplan: network is empty")
 	}
@@ -251,6 +251,11 @@ func Expand(input string) ([]netip.Prefix, error) {
 		return nil, err
 	}
 	return []netip.Prefix{prefix}, nil
+}
+
+func networkPart(input string) string {
+	network, _, _ := strings.Cut(input, "#")
+	return strings.TrimSpace(network)
 }
 
 func parseRange(raw string) ([]netip.Prefix, error) {

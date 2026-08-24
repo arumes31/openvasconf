@@ -420,6 +420,8 @@ type previewEnvelope struct {
 	ExpiresAt time.Time         `json:"expires_at"`
 }
 
+var signedTokenEncoding = base64.RawURLEncoding.Strict()
+
 func (s *Server) signPreview(value previewEnvelope) (string, error) {
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -427,8 +429,8 @@ func (s *Server) signPreview(value previewEnvelope) (string, error) {
 	}
 	mac := hmac.New(sha256.New, s.previewKey[:])
 	_, _ = mac.Write(payload)
-	return base64.RawURLEncoding.EncodeToString(payload) + "." +
-		base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+	return signedTokenEncoding.EncodeToString(payload) + "." +
+		signedTokenEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
 func (s *Server) verifyPreview(token string, destination *previewEnvelope) error {
@@ -436,11 +438,11 @@ func (s *Server) verifyPreview(token string, destination *previewEnvelope) error
 	if len(parts) != 2 {
 		return errors.New("preview confirmation is invalid; review the customer again")
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payload, err := signedTokenEncoding.DecodeString(parts[0])
 	if err != nil {
 		return errors.New("preview confirmation is invalid; review the customer again")
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	signature, err := signedTokenEncoding.DecodeString(parts[1])
 	if err != nil {
 		return errors.New("preview confirmation is invalid; review the customer again")
 	}

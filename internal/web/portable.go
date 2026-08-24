@@ -3,7 +3,6 @@ package web
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -188,7 +187,7 @@ func (s *Server) signImport(value importEnvelope) (string, error) {
 	}
 	mac := hmac.New(sha256.New, s.previewKey[:])
 	_, _ = mac.Write(payload)
-	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+	return signedTokenEncoding.EncodeToString(payload) + "." + signedTokenEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
 func (s *Server) verifyImport(token string, destination *importEnvelope) error {
@@ -196,11 +195,11 @@ func (s *Server) verifyImport(token string, destination *importEnvelope) error {
 	if len(parts) != 2 {
 		return errors.New("import confirmation is invalid; preview the file again")
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payload, err := signedTokenEncoding.DecodeString(parts[0])
 	if err != nil {
 		return errors.New("import confirmation is invalid; preview the file again")
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	signature, err := signedTokenEncoding.DecodeString(parts[1])
 	if err != nil {
 		return errors.New("import confirmation is invalid; preview the file again")
 	}

@@ -150,7 +150,7 @@ func TestCustomerPreviewCreateAndSoftDelete(t *testing.T) {
 
 	preview := url.Values{
 		"name":     {"testcomp1"},
-		"networks": {"10.1.0.0/16\n192.168.10.0\n7.7.7.7/32"},
+		"networks": {"10.1.0.0/16 # LAN\n192.168.10.0 # printer\n7.7.7.7/32 # internet"},
 	}
 	response := postForm(t, app, "/customers/preview", preview)
 	body := readBody(t, response)
@@ -182,6 +182,16 @@ func TestCustomerPreviewCreateAndSoftDelete(t *testing.T) {
 	created := customers[0]
 	if len(created.Networks) != 3 {
 		t.Fatalf("network count = %d, want 3", len(created.Networks))
+	}
+	wantInputs := map[string]string{
+		"10.1.0.0/16":     "10.1.0.0/16 # LAN",
+		"192.168.10.0/32": "192.168.10.0 # printer",
+		"7.7.7.7/32":      "7.7.7.7/32 # internet",
+	}
+	for _, network := range created.Networks {
+		if want := wantInputs[network.Prefix]; network.Input != want {
+			t.Errorf("network %s input = %q, want %q", network.Prefix, network.Input, want)
+		}
 	}
 	if created.ScheduleWeekday < 1 || created.ScheduleWeekday > 4 {
 		t.Fatalf("weekday = %d, want Monday through Thursday", created.ScheduleWeekday)
@@ -265,10 +275,30 @@ func TestSignedPreviewConfirmationAndTamperRejection(t *testing.T) {
 		t.Fatalf("signed preview token not rendered: %s", body)
 	}
 
-	tampered := match[1][:len(match[1])-1] + "x"
-	response = postForm(t, app, "/customers", url.Values{"preview_token": {tampered}})
-	if body := readBody(t, response); !strings.Contains(body, "preview confirmation is invalid") {
-		t.Fatalf("tampered confirmation was not rejected: %s", body)
+	parts := strings.Split(match[1], ".")
+	if len(parts) != 2 || parts[1] == "" {
+		t.Fatalf("invalid signed preview token: %q", match[1])
+	}
+	changedSignature := []byte(parts[1])
+	if changedSignature[0] == 'A' {
+		changedSignature[0] = 'B'
+	} else {
+		changedSignature[0] = 'A'
+	}
+	tamperedTokens := []struct {
+		name  string
+		token string
+	}{
+		{name: "non-canonical encoding", token: match[1][:len(match[1])-1] + "x"},
+		{name: "changed signature", token: parts[0] + "." + string(changedSignature)},
+	}
+	for _, test := range tamperedTokens {
+		t.Run(test.name, func(t *testing.T) {
+			tamperedResponse := postForm(t, app, "/customers", url.Values{"preview_token": {test.token}})
+			if body := readBody(t, tamperedResponse); !strings.Contains(body, "preview confirmation is invalid") {
+				t.Fatalf("tampered confirmation was not rejected: %s", body)
+			}
+		})
 	}
 
 	response = postForm(t, app, "/customers", url.Values{"preview_token": {match[1]}})
