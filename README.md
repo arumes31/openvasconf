@@ -67,15 +67,18 @@ The preview and reconciler use the same deterministic network plan:
 1. Only IPv4 is accepted.
 2. A bare address is stored as `/32`; for example, `192.168.10.0` means
    `192.168.10.0/32`, not `/24`.
-3. An inclusive `start-end` IPv4 range such as `192.168.20.10-192.168.20.30` is
+3. An entry can include a trailing `#` comment, such as
+   `192.168.0.0/24 # LAN`; comments are retained for editing but excluded from
+   planning and scans.
+4. An inclusive `start-end` IPv4 range such as `192.168.20.10-192.168.20.30` is
    converted into the smallest exact set of CIDRs before planning.
-4. Prefixes broader than `/24` are split into `/24` entries.
-5. Duplicate and overlapping coverage is scanned once.
-6. RFC1918 space is grouped as `PrivateIP`; public global-unicast space is
+5. Prefixes broader than `/24` are split into `/24` entries.
+6. Duplicate and overlapping coverage is scanned once.
+7. RFC1918 space is grouped as `PrivateIP`; public global-unicast space is
    grouped as `WAN`.
-7. Private and WAN entries are never mixed in the same target.
-8. A target can contain multiple prefixes, but never more than 4,095 unique IPs.
-9. Special-use ranges such as loopback, link-local, CGNAT, documentation,
+8. Private and WAN entries are never mixed in the same target.
+9. A target can contain multiple prefixes, but never more than 4,095 unique IPs.
+10. Special-use ranges such as loopback, link-local, CGNAT, documentation,
    multicast, and reserved space are rejected.
 
 Single hosts remain canonical `/32` values in SQLite. They are sent to current
@@ -305,8 +308,8 @@ appropriate; use **Randomize schedule** or edit the customer to move one.
    tags of 30 characters each.
 4. Enter one IPv4 address, CIDR, or inclusive `start-end` range per line.
    Comma-separated input is also accepted. A `.txt` or `.csv` file can populate
-   the field in the browser. Ranges are converted to the smallest exact set of
-   CIDRs.
+   the field in the browser. Add a trailing `#` comment to label an entry.
+   Ranges are converted to the smallest exact set of CIDRs.
 5. Keep the randomized weekly slot or choose any weekday and time of day.
 6. Keep the global scanner/config/port-list values or select customer overrides.
 7. Select **Review generated changes**, inspect normalization, overlap warnings,

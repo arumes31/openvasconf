@@ -22,7 +22,14 @@ if (compactToggle) {
 const networkArea = document.querySelector("#networks");
 const normalizeNetworks = (value) => {
   const fields = value.split(/[\n\r,;]+/).map((entry) => entry.trim()).filter(Boolean);
-  return [...new Set(fields.map((entry) => (entry.includes("/") || entry.includes("-")) ? entry : `${entry}/32`))].join("\n");
+  return [...new Set(fields.map((entry) => {
+    const commentIndex = entry.indexOf("#");
+    const network = (commentIndex === -1 ? entry : entry.slice(0, commentIndex)).trim();
+    const comment = commentIndex === -1 ? "" : entry.slice(commentIndex).trim();
+    if (!network) return "";
+    const normalized = (network.includes("/") || network.includes("-")) ? network : `${network}/32`;
+    return comment ? `${normalized} ${comment}` : normalized;
+  }).filter(Boolean))].join("\n");
 };
 const networkFile = document.querySelector("[data-network-file]");
 if (networkFile && networkArea) {

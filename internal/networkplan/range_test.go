@@ -17,6 +17,7 @@ func TestExpandRangeToMinimalCIDRs(t *testing.T) {
 	}{
 		{"single address", "192.168.1.10-192.168.1.10", []string{"192.168.1.10/32"}},
 		{"aligned block", "10.0.0.0-10.0.0.255", []string{"10.0.0.0/24"}},
+		{"commented block", "10.0.0.0-10.0.0.255 # LAN", []string{"10.0.0.0/24"}},
 		{"aligned large block", "10.0.0.0-10.0.1.255", []string{"10.0.0.0/23"}},
 		{
 			"unaligned split",
