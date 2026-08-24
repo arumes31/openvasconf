@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -141,6 +142,49 @@ func TestLoginCSRFAndSecurityHeaders(t *testing.T) {
 	}
 	if err := response.Body.Close(); err != nil {
 		t.Fatalf("closing dashboard response body: %v", err)
+	}
+}
+
+func TestCookieSecurityPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		secureCookies  bool
+		trustProxyTLS  bool
+		tls            bool
+		forwardedProto string
+		wantSecure     bool
+	}{
+		{name: "plain HTTP"},
+		{name: "forced secure", secureCookies: true, wantSecure: true},
+		{name: "direct TLS", tls: true, wantSecure: true},
+		{
+			name:           "trusted TLS proxy",
+			trustProxyTLS:  true,
+			forwardedProto: "https",
+			wantSecure:     true,
+		},
+		{name: "untrusted TLS proxy", forwardedProto: "https"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := &Server{
+				secureCookies:       test.secureCookies,
+				trustProxyTLSHeader: test.trustProxyTLS,
+			}
+			request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+			if test.tls {
+				request.TLS = &tls.ConnectionState{}
+			}
+			request.Header.Set("X-Forwarded-Proto", test.forwardedProto)
+			if got := server.isSecure(request); got != test.wantSecure {
+				t.Errorf("isSecure() = %t, want %t", got, test.wantSecure)
+			}
+		})
 	}
 }
 

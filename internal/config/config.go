@@ -102,12 +102,12 @@ func load() (Config, []error) {
 		problems = append(problems, err)
 	}
 
-	reportMaxFindings, err := integer("OPENVASCONF_REPORT_MAX_FINDINGS", defaultReportMaxFindings)
+	reportMaxFindings, err := nativeInteger("OPENVASCONF_REPORT_MAX_FINDINGS", defaultReportMaxFindings)
 	if err != nil {
 		problems = append(problems, err)
 	}
 
-	reportImportConcurrency, err := integer(
+	reportImportConcurrency, err := nativeInteger(
 		"OPENVASCONF_REPORT_IMPORT_CONCURRENCY",
 		defaultReportImportConcurrent,
 	)
@@ -115,7 +115,7 @@ func load() (Config, []error) {
 		problems = append(problems, err)
 	}
 
-	exportMaxRows, err := integer("OPENVASCONF_EXPORT_MAX_ROWS", defaultExportMaxRows)
+	exportMaxRows, err := nativeInteger("OPENVASCONF_EXPORT_MAX_ROWS", defaultExportMaxRows)
 	if err != nil {
 		problems = append(problems, err)
 	}
@@ -148,9 +148,9 @@ func load() (Config, []error) {
 		SessionLifetime:         sessionLifetime,
 		ReportSyncInterval:      reportSyncInterval,
 		ReportMaxXMLBytes:       reportMaxXMLBytes,
-		ReportMaxFindings:       int(reportMaxFindings),
-		ReportImportConcurrency: int(reportImportConcurrency),
-		ExportMaxRows:           int(exportMaxRows),
+		ReportMaxFindings:       reportMaxFindings,
+		ReportImportConcurrency: reportImportConcurrency,
+		ExportMaxRows:           exportMaxRows,
 		ExportMaxBytes:          exportMaxBytes,
 		SecureCookies:           secureCookies,
 		TrustProxyTLSHeader:     trustProxyTLS,
@@ -245,6 +245,18 @@ func integer(key string, fallback int64) (int64, error) {
 		return fallback, nil
 	}
 	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("config: parsing %s: %w", key, err)
+	}
+	return parsed, nil
+}
+
+func nativeInteger(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("config: parsing %s: %w", key, err)
 	}

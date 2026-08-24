@@ -1,0 +1,3 @@
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "The application uses x/crypto/bcrypt only; the advisory exclusively affects the unused openpgp packages and has no fixed module version."

@@ -56,7 +56,8 @@ func (s *Server) login(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.loginLimiter.success(request.RemoteAddr)
-	// #nosec G124 -- Secure is selected from TLS and the trusted deployment configuration.
+	// codeql[go/cookie-secure-not-set]
+	// #nosec G124 -- Secure is selected from TLS and trusted deployment configuration.
 	http.SetCookie(response, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
@@ -75,7 +76,8 @@ func (s *Server) logout(response http.ResponseWriter, request *http.Request) {
 			s.logger.Error("logout failed", "error", err)
 		}
 	}
-	// #nosec G124 -- this expires the session cookie using the same security policy.
+	// codeql[go/cookie-secure-not-set]
+	// #nosec G124 -- this expires the cookie using the same deployment policy.
 	http.SetCookie(response, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",

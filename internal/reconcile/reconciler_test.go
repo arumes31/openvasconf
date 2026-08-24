@@ -404,6 +404,30 @@ func TestGMPHostSpecificationsPreserveExactAddresses(t *testing.T) {
 	}
 }
 
+func TestPrefixEnd(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		prefix string
+		want   string
+	}{
+		{prefix: "0.0.0.0/0", want: "255.255.255.255"},
+		{prefix: "10.1.2.128/25", want: "10.1.2.255"},
+		{prefix: "192.168.10.7/32", want: "192.168.10.7"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.prefix, func(t *testing.T) {
+			t.Parallel()
+
+			prefix := netip.MustParsePrefix(test.prefix)
+			if got := prefixEnd(prefix).String(); got != test.want {
+				t.Errorf("prefixEnd(%s) = %s, want %s", test.prefix, got, test.want)
+			}
+		})
+	}
+}
+
 func TestGMPHostSpecificationsCoalesceExpandedRange(t *testing.T) {
 	t.Parallel()
 
