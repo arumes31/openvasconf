@@ -128,6 +128,49 @@ func TestReconcilerLifecycle(t *testing.T) {
 	}
 }
 
+func TestReconcilerModifiesTargetWithInclusiveRange(t *testing.T) {
+	t.Parallel()
+
+	repository := testRepository(t)
+	configuredSettings(t, repository)
+	value := createCustomer(t, repository, "range", []string{"10.232.50.1"})
+	greenbone := newFakeGreenbone()
+	reconciler := New(
+		repository,
+		greenbone,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		time.Minute,
+	)
+	if err := reconciler.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce(create) error = %v", err)
+	}
+
+	value, err := repository.Customer(t.Context(), value.ID)
+	if err != nil {
+		t.Fatalf("Customer() error = %v", err)
+	}
+	value.Networks = networks(t, value.ID, value.Name, []string{"10.232.50.1-10.232.60.254"})
+	if err := repository.UpdateCustomer(t.Context(), value); err != nil {
+		t.Fatalf("UpdateCustomer() error = %v", err)
+	}
+	greenbone.operations = nil
+	greenbone.targets = nil
+	if err := reconciler.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce(modify) error = %v", err)
+	}
+
+	if got := greenbone.operationCount("modify target"); got != 1 {
+		t.Fatalf("target modifies = %d, want 1; operations: %v", got, greenbone.operations)
+	}
+	if len(greenbone.targets) != 1 {
+		t.Fatalf("target requests = %d, want 1", len(greenbone.targets))
+	}
+	want := []string{"10.232.50.1-10.232.60.254"}
+	if got := greenbone.targets[0].Hosts; !slices.Equal(got, want) {
+		t.Errorf("target hosts = %v, want %v", got, want)
+	}
+}
+
 func TestReconcilerRefusesForeignResource(t *testing.T) {
 	t.Parallel()
 
@@ -347,7 +390,7 @@ func TestWeeklyCalendar(t *testing.T) {
 	}
 }
 
-func TestPrefixStringsFormatsHostsForGMP(t *testing.T) {
+func TestGMPHostSpecificationsPreserveExactAddresses(t *testing.T) {
 	t.Parallel()
 
 	prefixes := []netip.Prefix{
@@ -355,9 +398,28 @@ func TestPrefixStringsFormatsHostsForGMP(t *testing.T) {
 		netip.MustParsePrefix("192.168.10.0/32"),
 		netip.MustParsePrefix("7.7.7.7/32"),
 	}
-	want := []string{"10.1.0.0/24", "192.168.10.0", "7.7.7.7"}
-	if got := prefixStrings(prefixes); !slices.Equal(got, want) {
-		t.Errorf("prefixStrings() = %v, want %v", got, want)
+	want := []string{"7.7.7.7", "10.1.0.0-10.1.0.255", "192.168.10.0"}
+	if got := gmpHostSpecifications(prefixes); !slices.Equal(got, want) {
+		t.Errorf("gmpHostSpecifications() = %v, want %v", got, want)
+	}
+}
+
+func TestGMPHostSpecificationsCoalesceExpandedRange(t *testing.T) {
+	t.Parallel()
+
+	plan, err := networkplan.Build(networkplan.Input{
+		CustomerName: "range",
+		Networks:     []string{"10.232.50.1-10.232.60.254"},
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(plan.Targets) != 1 {
+		t.Fatalf("target count = %d, want 1", len(plan.Targets))
+	}
+	want := []string{"10.232.50.1-10.232.60.254"}
+	if got := gmpHostSpecifications(plan.Targets[0].Prefixes); !slices.Equal(got, want) {
+		t.Errorf("gmpHostSpecifications() = %v, want %v", got, want)
 	}
 }
 
@@ -473,28 +535,30 @@ func networks(t *testing.T, customerID, name string, inputs []string) []customer
 	t.Helper()
 	result := make([]customer.Network, 0, len(inputs))
 	for _, input := range inputs {
-		prefix, err := networkplan.Parse(input)
+		prefixes, err := networkplan.Expand(input)
 		if err != nil {
-			t.Fatalf("networkplan.Parse(%q) error = %v", input, err)
+			t.Fatalf("networkplan.Expand(%q) error = %v", input, err)
 		}
-		plan, err := networkplan.Build(networkplan.Input{
-			CustomerName: name,
-			Networks:     []string{input},
-		})
-		if err != nil {
-			t.Fatalf("networkplan.Build(%q) error = %v", input, err)
+		for _, prefix := range prefixes {
+			plan, buildErr := networkplan.Build(networkplan.Input{
+				CustomerName: name,
+				Networks:     []string{prefix.String()},
+			})
+			if buildErr != nil {
+				t.Fatalf("networkplan.Build(%q) error = %v", prefix, buildErr)
+			}
+			networkID, idErr := id.New()
+			if idErr != nil {
+				t.Fatalf("id.New() error = %v", idErr)
+			}
+			result = append(result, customer.Network{
+				ID:         networkID,
+				CustomerID: customerID,
+				Input:      input,
+				Prefix:     prefix.String(),
+				Class:      string(plan.Targets[0].Class),
+			})
 		}
-		networkID, err := id.New()
-		if err != nil {
-			t.Fatalf("id.New() error = %v", err)
-		}
-		result = append(result, customer.Network{
-			ID:         networkID,
-			CustomerID: customerID,
-			Input:      input,
-			Prefix:     prefix.String(),
-			Class:      string(plan.Targets[0].Class),
-		})
 	}
 	return result
 }
@@ -523,6 +587,7 @@ type fakeGreenbone struct {
 	failTaskCreate int
 	comments       map[string]string
 	operations     []string
+	targets        []gmp.Target
 }
 
 func newFakeGreenbone() *fakeGreenbone {
@@ -553,10 +618,12 @@ func (f *fakeGreenbone) DeleteSchedule(_ context.Context, id string) error {
 }
 
 func (f *fakeGreenbone) CreateTarget(_ context.Context, value gmp.Target) (string, error) {
+	f.targets = append(f.targets, value)
 	return f.create("target", value.Name, value.Comment), nil
 }
 
 func (f *fakeGreenbone) ModifyTarget(_ context.Context, id string, value gmp.Target) error {
+	f.targets = append(f.targets, value)
 	return f.modify("target", id, value.Name, value.Comment)
 }
 

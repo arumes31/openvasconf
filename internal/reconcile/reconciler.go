@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -437,7 +438,7 @@ func (r *Reconciler) applyDesired(
 		target := gmp.Target{
 			Name:       targetPlan.Name,
 			Comment:    targetMarker,
-			Hosts:      prefixStrings(targetPlan.Prefixes),
+			Hosts:      gmpHostSpecifications(targetPlan.Prefixes),
 			PortListID: value.EffectivePortList(settings).ID,
 		}
 		if err := r.releaseTaskForTargetChange(
@@ -914,14 +915,48 @@ func desiredHash(value any) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func prefixStrings(prefixes []netip.Prefix) []string {
+func gmpHostSpecifications(prefixes []netip.Prefix) []string {
+	if len(prefixes) == 0 {
+		return nil
+	}
+
+	ordered := slices.Clone(prefixes)
+	slices.SortFunc(ordered, func(left, right netip.Prefix) int {
+		if compared := left.Addr().Compare(right.Addr()); compared != 0 {
+			return compared
+		}
+		return left.Bits() - right.Bits()
+	})
 	result := make([]string, 0, len(prefixes))
-	for _, prefix := range prefixes {
-		if prefix.Bits() == 32 {
-			result = append(result, prefix.Addr().String())
+	start := ordered[0].Addr()
+	end := prefixEnd(ordered[0])
+	for _, prefix := range ordered[1:] {
+		currentStart := prefix.Addr()
+		currentEnd := prefixEnd(prefix)
+		next := end.Next()
+		if currentStart.Compare(end) <= 0 || (next.IsValid() && currentStart == next) {
+			if currentEnd.Compare(end) > 0 {
+				end = currentEnd
+			}
 			continue
 		}
-		result = append(result, prefix.String())
+		result = append(result, gmpHostRange(start, end))
+		start, end = currentStart, currentEnd
 	}
-	return result
+	return append(result, gmpHostRange(start, end))
+}
+
+func prefixEnd(prefix netip.Prefix) netip.Addr {
+	address := prefix.Masked().Addr().As4()
+	start := uint64(binary.BigEndian.Uint32(address[:]))
+	last := start + (uint64(1) << (32 - prefix.Bits())) - 1
+	binary.BigEndian.PutUint32(address[:], uint32(last))
+	return netip.AddrFrom4(address)
+}
+
+func gmpHostRange(start, end netip.Addr) string {
+	if start == end {
+		return start.String()
+	}
+	return start.String() + "-" + end.String()
 }
