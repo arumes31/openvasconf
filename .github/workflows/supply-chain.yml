@@ -83,7 +83,8 @@ jobs:
       - name: Install actionlint
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Run actionlint
-        run: $(go env GOPATH)/bin/actionlint -color
+        run: |
+          "$(go env GOPATH)/bin/actionlint" -color
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
         with:
