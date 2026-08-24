@@ -20,9 +20,23 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY --from=assets /src/dist/app.js ./internal/web/static/app.js
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/openvasconf ./cmd/openvasconf
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/openvasconf ./cmd/openvasconf \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/openvasconf-updater ./cmd/openvasconf-updater
 
-FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+FROM docker:29-cli@sha256:000bb62ff495f986c9f5578eb67cc2cb98b91138eda81d7762d5371eb8a497fe AS updater
+
+RUN addgroup -g 1001 -S openvasconf \
+    && adduser -u 1001 -S -D -H -G openvasconf openvasconf \
+    && install -d -o openvasconf -g openvasconf -m 0700 /state /backups \
+    && install -d -o openvasconf -g openvasconf -m 0750 /run/openvasconf-updater
+COPY --from=build --chown=openvasconf:openvasconf /out/openvasconf-updater /usr/local/bin/openvasconf-updater
+
+USER openvasconf:openvasconf
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["test", "-S", "/run/openvasconf-updater/updater.sock"]
+ENTRYPOINT ["/usr/local/bin/openvasconf-updater"]
+
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
 
 RUN addgroup -g 1001 -S openvasconf \
     && adduser -u 1001 -S -D -H -G openvasconf openvasconf \

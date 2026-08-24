@@ -347,6 +347,7 @@ services:
       OPENVASCONF_GMP_SOCKET: "/run/gvmd/gvmd.sock"
       OPENVASCONF_GMP_USERNAME: "${OPENVASCONF_GMP_USERNAME:-admin}"
       OPENVASCONF_GMP_PASSWORD_FILE: "/run/secrets/openvasconf_gmp_password"
+      OPENVASCONF_UPDATER_SOCKET: "/run/openvasconf-updater/updater.sock"
       OPENVASCONF_ADMIN_PASSWORD_FILE: "/run/secrets/openvasconf_admin_password"
       OPENVASCONF_TIMEZONE: "${OPENVASCONF_TIMEZONE:-Europe/Vienna}"
       OPENVASCONF_SECURE_COOKIES: "${OPENVASCONF_SECURE_COOKIES:-false}"
@@ -356,9 +357,59 @@ services:
     volumes:
       - openvasconf_data:/data
       - gvmd_socket_vol:/run/gvmd
+      - openvasconf_updater_socket:/run/openvasconf-updater
     depends_on:
       gvmd-user-init:
         condition: service_completed_successfully
+      openvasconf-updater:
+        condition: service_healthy
+
+  # This narrowly scoped helper is the only openvasconf component with Docker
+  # authority. Its API accepts fixed Greenbone operations over a private socket;
+  # the web application never mounts the Docker socket.
+  openvasconf-updater:
+    image: "${OPENVASCONF_UPDATER_IMAGE:?set OPENVASCONF_UPDATER_IMAGE to an approved repository@sha256 digest}"
+    restart: unless-stopped
+    init: true
+    user: "1001:1001"
+    group_add:
+      - "${OPENVASCONF_DOCKER_GID:-999}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      OPENVASCONF_UPDATER_SOCKET: "/run/openvasconf-updater/updater.sock"
+      OPENVASCONF_UPDATER_STATE: "/state/updater.json"
+      OPENVASCONF_UPDATER_BACKUPS: "/backups"
+      OPENVASCONF_UPDATER_COMPOSE_FILE: "/deployment/greenbone-compose.yaml"
+      OPENVASCONF_UPDATER_PROJECT: "greenbone-community-edition"
+      OPENVASCONF_GMP_SOCKET: "/run/gvmd/gvmd.sock"
+      OPENVASCONF_GMP_USERNAME: "${OPENVASCONF_GMP_USERNAME:-admin}"
+      OPENVASCONF_GMP_PASSWORD_FILE: "/run/secrets/openvasconf_gmp_password"
+      OPENVASCONF_UPDATER_IMAGE: "${OPENVASCONF_UPDATER_IMAGE:?set OPENVASCONF_UPDATER_IMAGE to an approved repository@sha256 digest}"
+      OPENVASCONF_TIMEZONE: "${OPENVASCONF_TIMEZONE:-Europe/Vienna}"
+    secrets:
+      - openvasconf_gmp_password
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./greenbone-compose.yaml:/deployment/greenbone-compose.yaml:ro
+      - gvmd_socket_vol:/run/gvmd
+      - openvasconf_updater_socket:/run/openvasconf-updater
+      - openvasconf_updater_state:/state
+      - openvasconf_updater_backups:/backups
+    depends_on:
+      gvmd-user-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/openvasconf-updater/updater.sock"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
 secrets:
   openvasconf_admin_password:
@@ -385,3 +436,6 @@ volumes:
   nginx_config_vol:
   nginx_certificates_vol:
   openvasconf_data:
+  openvasconf_updater_socket:
+  openvasconf_updater_state:
+  openvasconf_updater_backups:

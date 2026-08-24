@@ -1,0 +1,4 @@
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2026-11-22
+reason = "The advisory affects only unused x/crypto/openpgp paths; CI rejects those paths if they enter the dependency graph."

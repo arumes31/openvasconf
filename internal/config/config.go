@@ -13,6 +13,7 @@ const (
 	defaultListenAddress          = "127.0.0.1:8080"
 	defaultDatabasePath           = "data/openvasconf.db"
 	defaultGMPSocketPath          = "/run/gvmd/gvmd.sock"
+	defaultUpdaterSocketPath      = "/run/openvasconf-updater/updater.sock"
 	defaultGMPUsername            = "admin"
 	defaultTimezone               = "Europe/Vienna"
 	defaultReconcileEvery         = time.Minute
@@ -31,6 +32,7 @@ type Config struct {
 	ListenAddress           string
 	DatabasePath            string
 	GMPSocketPath           string
+	UpdaterSocketPath       string
 	GMPUsername             string
 	GMPPassword             string
 	AdminPassword           string
@@ -102,12 +104,12 @@ func load() (Config, []error) {
 		problems = append(problems, err)
 	}
 
-	reportMaxFindings, err := integer("OPENVASCONF_REPORT_MAX_FINDINGS", defaultReportMaxFindings)
+	reportMaxFindings, err := nativeInteger("OPENVASCONF_REPORT_MAX_FINDINGS", defaultReportMaxFindings)
 	if err != nil {
 		problems = append(problems, err)
 	}
 
-	reportImportConcurrency, err := integer(
+	reportImportConcurrency, err := nativeInteger(
 		"OPENVASCONF_REPORT_IMPORT_CONCURRENCY",
 		defaultReportImportConcurrent,
 	)
@@ -115,7 +117,7 @@ func load() (Config, []error) {
 		problems = append(problems, err)
 	}
 
-	exportMaxRows, err := integer("OPENVASCONF_EXPORT_MAX_ROWS", defaultExportMaxRows)
+	exportMaxRows, err := nativeInteger("OPENVASCONF_EXPORT_MAX_ROWS", defaultExportMaxRows)
 	if err != nil {
 		problems = append(problems, err)
 	}
@@ -139,6 +141,7 @@ func load() (Config, []error) {
 		ListenAddress:           value("OPENVASCONF_LISTEN", defaultListenAddress),
 		DatabasePath:            value("OPENVASCONF_DATABASE", defaultDatabasePath),
 		GMPSocketPath:           value("OPENVASCONF_GMP_SOCKET", defaultGMPSocketPath),
+		UpdaterSocketPath:       value("OPENVASCONF_UPDATER_SOCKET", defaultUpdaterSocketPath),
 		GMPUsername:             value("OPENVASCONF_GMP_USERNAME", defaultGMPUsername),
 		GMPPassword:             gmpPassword,
 		AdminPassword:           adminPassword,
@@ -148,9 +151,9 @@ func load() (Config, []error) {
 		SessionLifetime:         sessionLifetime,
 		ReportSyncInterval:      reportSyncInterval,
 		ReportMaxXMLBytes:       reportMaxXMLBytes,
-		ReportMaxFindings:       int(reportMaxFindings),
-		ReportImportConcurrency: int(reportImportConcurrency),
-		ExportMaxRows:           int(exportMaxRows),
+		ReportMaxFindings:       reportMaxFindings,
+		ReportImportConcurrency: reportImportConcurrency,
+		ExportMaxRows:           exportMaxRows,
 		ExportMaxBytes:          exportMaxBytes,
 		SecureCookies:           secureCookies,
 		TrustProxyTLSHeader:     trustProxyTLS,
@@ -173,6 +176,9 @@ func (c Config) validate() []error {
 	}
 	if strings.TrimSpace(c.GMPSocketPath) == "" {
 		problems = append(problems, errors.New("config: OPENVASCONF_GMP_SOCKET gmp socket path is required"))
+	}
+	if strings.TrimSpace(c.UpdaterSocketPath) == "" {
+		problems = append(problems, errors.New("config: OPENVASCONF_UPDATER_SOCKET updater socket path is required"))
 	}
 	if strings.TrimSpace(c.GMPUsername) == "" {
 		problems = append(problems, errors.New("config: OPENVASCONF_GMP_USERNAME gmp username is required"))
@@ -245,6 +251,18 @@ func integer(key string, fallback int64) (int64, error) {
 		return fallback, nil
 	}
 	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("config: parsing %s: %w", key, err)
+	}
+	return parsed, nil
+}
+
+func nativeInteger(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, fmt.Errorf("config: parsing %s: %w", key, err)
 	}

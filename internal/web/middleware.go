@@ -49,7 +49,8 @@ func (s *Server) csrf(next http.Handler) http.Handler {
 				return
 			}
 			token = generated
-			// #nosec G124 -- Secure is selected from TLS and the trusted deployment configuration.
+			// codeql[go/cookie-secure-not-set]
+			// #nosec G124 -- Secure is selected from TLS and trusted deployment configuration.
 			http.SetCookie(response, &http.Cookie{
 				Name:     csrfCookieName,
 				Value:    token,

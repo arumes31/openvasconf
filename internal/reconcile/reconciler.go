@@ -441,6 +441,9 @@ func (r *Reconciler) applyDesired(
 			Hosts:      gmpHostSpecifications(targetPlan.Prefixes),
 			PortListID: value.EffectivePortList(settings).ID,
 		}
+		if targetPlan.Class == networkplan.ClassWAN {
+			target.AliveTest = gmp.AliveTestConsiderAlive
+		}
 		if err := r.releaseTaskForTargetChange(
 			ctx,
 			value.ID,
@@ -948,9 +951,9 @@ func gmpHostSpecifications(prefixes []netip.Prefix) []string {
 
 func prefixEnd(prefix netip.Prefix) netip.Addr {
 	address := prefix.Masked().Addr().As4()
-	start := uint64(binary.BigEndian.Uint32(address[:]))
-	last := start + (uint64(1) << (32 - prefix.Bits())) - 1
-	binary.BigEndian.PutUint32(address[:], uint32(last))
+	start := binary.BigEndian.Uint32(address[:])
+	hostMask := ^uint32(0) >> prefix.Bits()
+	binary.BigEndian.PutUint32(address[:], start|hostMask)
 	return netip.AddrFrom4(address)
 }
 

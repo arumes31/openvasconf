@@ -269,6 +269,17 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .operations-strip span, .operations-strip small { color: var(--paper-dim); font-size: 9px; text-transform: uppercase; }
 .operations-strip strong { align-self: end; color: var(--signal); font: 700 22px var(--display); }
 .settings-operations { margin-top: 12px; }
+.update-layout { display: grid; grid-template-columns: minmax(520px, 1fr) minmax(420px, 1fr); gap: 12px; align-items: start; }
+.update-layout .settings-panel { margin: 0; }
+.update-overview { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.update-active { margin-bottom: 12px; border-left: 3px solid var(--amber); }
+.update-active > small { color: var(--paper-dim); }
+.update-pause { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 12px; border-color: rgba(255, 92, 77, .42); }
+.update-settings-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.update-settings-grid .check-label { align-self: center; margin-top: 12px; }
+.update-table { min-width: 760px; }
+.update-table code { display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-history { min-width: 980px; }
 
 .alert { display: flex; align-items: baseline; gap: 12px; margin: 0 0 10px; padding: 9px 12px; border: 1px solid var(--line); border-left: 3px solid var(--signal); background: var(--signal-dim); font-size: 11px; }
 .alert span { flex: none; color: var(--signal); font-weight: 700; letter-spacing: .08em; }
@@ -327,6 +338,9 @@ td progress { max-width: 120px; }
 .status-applied, .status-deleted { color: var(--signal); }
 .status-pending, .status-syncing { color: var(--amber); }
 .status-error { color: var(--fault); }
+.status-succeeded { color: var(--signal); }
+.status-running, .status-queued, .status-waiting-for-scans { color: var(--amber); }
+.status-failed, .status-rolled-back, .status-degraded, .status-cancelled { color: var(--fault); }
 .empty-state { padding: 34px 16px; border: 1px dashed var(--line); text-align: center; }
 .empty-state span { color: var(--signal); font-size: 10px; letter-spacing: .14em; }
 
@@ -418,11 +432,16 @@ legend { color: var(--paper-dim); font-size: 8px; letter-spacing: .1em; text-tra
   .health-strip > summary strong { max-width: 120px; }
 }
 
+@media (max-width: 952px) {
+  .update-layout { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 940px) {
   .masthead { grid-template-columns: max-content minmax(250px, 1fr) max-content; }
   .brand > span:last-child, .health-strip > summary strong, .health-strip > summary small, .density-toggle { display: none; }
   .primary-nav { justify-content: flex-start; }
   .editor-grid, .login-grid { grid-template-columns: 1fr; }
+  .update-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .login-grid { gap: 24px; padding: 30px 0; }
   .form-panel { padding: 14px; }
   .filter-bar { grid-template-columns: repeat(4, minmax(110px, 1fr)); }
@@ -446,6 +465,8 @@ legend { color: var(--paper-dim); font-size: 8px; letter-spacing: .1em; text-tra
   .filter-bar > :first-child { grid-column: 1 / -1; }
   .filter-bar button { grid-column: 1 / -1; }
   .settings-grid, .schedule-fields { grid-template-columns: 1fr; }
+  .update-settings-grid { grid-template-columns: 1fr; }
+  .update-pause { align-items: flex-start; flex-direction: column; }
   .check-grid { grid-template-columns: repeat(2, 1fr); }
   .change-grid { grid-template-columns: repeat(2, 1fr); }
   .event-list li { grid-template-columns: 1fr 1fr; gap: 4px 10px; }

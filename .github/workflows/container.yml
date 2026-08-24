@@ -45,7 +45,7 @@ jobs:
       skip_scorecard: true
 
   publish:
-    name: Build, attest, and sign
+    name: Build, attest, and sign (${{ matrix.variant }})
     needs:
       - validate-ci
       - validate-security
@@ -56,6 +56,18 @@ jobs:
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: application
+            target: runtime
+            suffix: ""
+            artifact: image-digest
+          - variant: updater
+            target: updater
+            suffix: -updater
+            artifact: updater-image-digest
     permissions:
       actions: read # Resolve workflow metadata during SARIF upload.
       attestations: write # Store the image provenance attestation.
@@ -93,7 +105,8 @@ jobs:
         shell: bash
         env:
           REPOSITORY: ${{ github.repository }}
-        run: echo "name=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          SUFFIX: ${{ matrix.suffix }}
+        run: echo "name=ghcr.io/${REPOSITORY,,}${SUFFIX}" >> "$GITHUB_OUTPUT"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
       - name: Set up Docker Buildx
@@ -121,10 +134,11 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          target: ${{ matrix.target }}
           platforms: linux/amd64,linux/arm64
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
           provenance: mode=max
           sbom: true
           outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
@@ -189,13 +203,13 @@ jobs:
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           sarif_file: trivy-release-amd64.sarif
-          category: trivy-release-amd64
+          category: trivy-release-${{ matrix.variant }}-amd64
       - name: Upload arm64 release SARIF
         if: ${{ always() && hashFiles('trivy-release-arm64.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           sarif_file: trivy-release-arm64.sarif
-          category: trivy-release-arm64
+          category: trivy-release-${{ matrix.variant }}-arm64
       - name: Enforce release image scans
         if: ${{ always() && (steps.trivy-amd64.outcome == 'failure' || steps.trivy-arm64.outcome == 'failure') }}
         run: exit 1
@@ -226,7 +240,7 @@ jobs:
       - name: Upload image digest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: image-digest
+          name: ${{ matrix.artifact }}
           path: image-digest.txt
           if-no-files-found: error
           retention-days: 30

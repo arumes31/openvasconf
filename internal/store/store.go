@@ -132,6 +132,10 @@ func Open(ctx context.Context, path, timezone string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := store.bootstrapUpdatePolicy(ctx, timezone); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return store, nil
 }
 

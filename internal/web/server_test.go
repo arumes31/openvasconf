@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"openvasconf/internal/auth"
 	"openvasconf/internal/gmp"
 	"openvasconf/internal/store"
+	"openvasconf/internal/updater"
 )
 
 const testAdminPassword = "correct horse battery staple"
@@ -52,6 +54,10 @@ type testWebApp struct {
 }
 
 func newTestWebApp(t *testing.T) testWebApp {
+	return newTestWebAppWithUpdater(t, nil)
+}
+
+func newTestWebAppWithUpdater(t *testing.T, updateManager updater.Manager) testWebApp {
 	t.Helper()
 	repository, err := store.Open(
 		context.Background(),
@@ -78,6 +84,7 @@ func newTestWebApp(t *testing.T) testWebApp {
 		Auth:       authenticator,
 		Greenbone:  fakeGreenbone{options: options},
 		Syncer:     syncer,
+		Updater:    updateManager,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -95,6 +102,36 @@ func newTestWebApp(t *testing.T) testWebApp {
 		repository: repository,
 		syncer:     syncer,
 	}
+}
+
+type fakeUpdateManager struct {
+	status       updater.Status
+	configured   updater.Policy
+	triggered    updater.Kind
+	acknowledged bool
+}
+
+func (m *fakeUpdateManager) Status(context.Context) (updater.Status, error) {
+	return m.status, nil
+}
+
+func (m *fakeUpdateManager) Configure(_ context.Context, policy updater.Policy) error {
+	m.configured = policy
+	return nil
+}
+
+func (m *fakeUpdateManager) Trigger(
+	_ context.Context,
+	kind updater.Kind,
+	_ updater.TriggerRequest,
+) (updater.Operation, error) {
+	m.triggered = kind
+	return updater.Operation{ID: "test-operation", Kind: kind}, nil
+}
+
+func (m *fakeUpdateManager) Acknowledge(context.Context) error {
+	m.acknowledged = true
+	return nil
 }
 
 func TestLoginCSRFAndSecurityHeaders(t *testing.T) {
@@ -141,6 +178,49 @@ func TestLoginCSRFAndSecurityHeaders(t *testing.T) {
 	}
 	if err := response.Body.Close(); err != nil {
 		t.Fatalf("closing dashboard response body: %v", err)
+	}
+}
+
+func TestCookieSecurityPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		secureCookies  bool
+		trustProxyTLS  bool
+		tls            bool
+		forwardedProto string
+		wantSecure     bool
+	}{
+		{name: "plain HTTP"},
+		{name: "forced secure", secureCookies: true, wantSecure: true},
+		{name: "direct TLS", tls: true, wantSecure: true},
+		{
+			name:           "trusted TLS proxy",
+			trustProxyTLS:  true,
+			forwardedProto: "https",
+			wantSecure:     true,
+		},
+		{name: "untrusted TLS proxy", forwardedProto: "https"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := &Server{
+				secureCookies:       test.secureCookies,
+				trustProxyTLSHeader: test.trustProxyTLS,
+			}
+			request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+			if test.tls {
+				request.TLS = &tls.ConnectionState{}
+			}
+			request.Header.Set("X-Forwarded-Proto", test.forwardedProto)
+			if got := server.isSecure(request); got != test.wantSecure {
+				t.Errorf("isSecure() = %t, want %t", got, test.wantSecure)
+			}
+		})
 	}
 }
 
@@ -257,6 +337,62 @@ func TestJSONPreviewAndSettingsOverride(t *testing.T) {
 	}
 	if settings.Scanner.ID != "scanner-1" || settings.ScanConfig.ID != "config-1" || settings.PortList.ID != "ports-1" {
 		t.Fatalf("settings were not persisted: %#v", settings)
+	}
+}
+
+func TestUpdaterPagePolicyAndStackTrigger(t *testing.T) {
+	manager := &fakeUpdateManager{status: updater.Status{
+		ProtocolVersion: updater.ProtocolVersion,
+		Available:       true,
+		Policy:          updater.DefaultPolicy("Europe/Vienna"),
+	}}
+	app := newTestWebAppWithUpdater(t, manager)
+	login(t, app)
+
+	response, err := app.client.Get(app.server.URL + "/updates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, response)
+	if response.StatusCode != http.StatusOK || !strings.Contains(body, "Greenbone updates") {
+		t.Fatalf("updates page = %d: %s", response.StatusCode, body)
+	}
+
+	policyForm := url.Values{
+		"feed_enabled":                 {"on"},
+		"feed_time":                    {"01:30"},
+		"stack_enabled":                {"on"},
+		"stack_weekday":                {"7"},
+		"stack_time":                   {"03:00"},
+		"stack_window_minutes":         {"180"},
+		"update_timezone":              {"Europe/Vienna"},
+		"backup_retention":             {"4"},
+		"verification_timeout_minutes": {"120"},
+	}
+	response = postForm(t, app, "/updates/settings", policyForm)
+	_ = readBody(t, response)
+	if manager.configured.FeedMinute != 90 || !manager.configured.StackEnabled {
+		t.Fatalf("configured policy = %#v", manager.configured)
+	}
+	stored, err := app.repository.UpdatePolicy(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != manager.configured {
+		t.Fatalf("stored policy = %#v, configured = %#v", stored, manager.configured)
+	}
+
+	response = postForm(t, app, "/updates/stack", nil)
+	_ = readBody(t, response)
+	if manager.triggered != updater.KindStack {
+		t.Fatalf("triggered kind = %q, want %q", manager.triggered, updater.KindStack)
+	}
+	events, err := app.repository.AuditEvents(t.Context(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 2 || events[0].ResourceKind != "updater" {
+		t.Fatalf("audit events = %#v", events)
 	}
 }
 

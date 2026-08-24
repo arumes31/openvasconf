@@ -13,6 +13,10 @@ const (
 	maxListPages = 100
 )
 
+type AliveTest string
+
+const AliveTestConsiderAlive AliveTest = "Consider Alive"
+
 type Option struct {
 	ID   string
 	Name string
@@ -36,6 +40,7 @@ type Target struct {
 	Comment    string
 	Hosts      []string
 	PortListID string
+	AliveTest  AliveTest `json:"alive_test,omitempty"`
 }
 
 type Task struct {
@@ -152,8 +157,22 @@ type scheduleRequest struct {
 }
 
 func (c *Client) CreateTarget(ctx context.Context, value Target) (string, error) {
+	request := newTargetRequest(value)
+	request.XMLName = xml.Name{Local: "create_target"}
+	return c.create(ctx, "create_target", request)
+}
+
+func (c *Client) ModifyTarget(ctx context.Context, targetID string, value Target) error {
+	emptyExcludeHosts := ""
+	request := newTargetRequest(value)
+	request.XMLName = xml.Name{Local: "modify_target"}
+	request.ResourceID = targetID
+	request.ExcludeHosts = &emptyExcludeHosts
+	return c.modify(ctx, "modify_target", request)
+}
+
+func newTargetRequest(value Target) targetRequest {
 	request := targetRequest{
-		XMLName: xml.Name{Local: "create_target"},
 		Name:    value.Name,
 		Comment: value.Comment,
 		Hosts:   strings.Join(value.Hosts, ","),
@@ -161,23 +180,10 @@ func (c *Client) CreateTarget(ctx context.Context, value Target) (string, error)
 			ID: value.PortListID,
 		},
 	}
-	return c.create(ctx, "create_target", request)
-}
-
-func (c *Client) ModifyTarget(ctx context.Context, targetID string, value Target) error {
-	emptyExcludeHosts := ""
-	request := targetRequest{
-		XMLName:      xml.Name{Local: "modify_target"},
-		ResourceID:   targetID,
-		Name:         value.Name,
-		Comment:      value.Comment,
-		Hosts:        strings.Join(value.Hosts, ","),
-		ExcludeHosts: &emptyExcludeHosts,
-		PortList: resourceReference{
-			ID: value.PortListID,
-		},
+	if value.AliveTest != "" {
+		request.AliveTests = value.AliveTest
 	}
-	return c.modify(ctx, "modify_target", request)
+	return request
 }
 
 type targetRequest struct {
@@ -187,6 +193,7 @@ type targetRequest struct {
 	Comment      string            `xml:"comment"`
 	Hosts        string            `xml:"hosts"`
 	ExcludeHosts *string           `xml:"exclude_hosts,omitempty"`
+	AliveTests   AliveTest         `xml:"alive_tests,omitempty"`
 	PortList     resourceReference `xml:"port_list"`
 }
 

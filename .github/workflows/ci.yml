@@ -45,7 +45,7 @@ jobs:
       - name: Run go vet
         run: go vet ./...
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893 # v9.3.0
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.13.0
           args: --timeout=5m
@@ -113,11 +113,19 @@ jobs:
           test -z "$(find asset-one -type f -name '*.map' -print -quit)"
       - name: Build runtime image
         run: docker build --tag openvasconf:ci .
+      - name: Build updater image
+        run: docker build --target updater --tag openvasconf-updater:ci .
       - name: Check runtime image
         shell: bash
         run: |
           test "$(docker image inspect openvasconf:ci --format '{{.Config.User}}')" = "openvasconf:openvasconf"
           docker run --rm --entrypoint /bin/sh openvasconf:ci -c '! command -v node && ! command -v npm && ! command -v go'
+      - name: Check updater image
+        shell: bash
+        run: |
+          test "$(docker image inspect openvasconf-updater:ci --format '{{.Config.User}}')" = "openvasconf:openvasconf"
+          docker run --rm --entrypoint docker openvasconf-updater:ci compose version
+          docker run --rm --entrypoint /bin/sh openvasconf-updater:ci -c '! command -v node && ! command -v npm && ! command -v go'
       - name: Verify embedded asset in hardened runtime
         shell: bash
         run: |

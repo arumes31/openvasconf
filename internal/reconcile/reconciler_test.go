@@ -171,6 +171,42 @@ func TestReconcilerModifiesTargetWithInclusiveRange(t *testing.T) {
 	}
 }
 
+func TestReconcilerConsidersWANTargetsAlive(t *testing.T) {
+	t.Parallel()
+
+	repository := testRepository(t)
+	configuredSettings(t, repository)
+	createCustomer(t, repository, "alive", []string{"10.0.0.1", "8.8.8.8"})
+	greenbone := newFakeGreenbone()
+	reconciler := New(
+		repository,
+		greenbone,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		time.Minute,
+	)
+
+	if err := reconciler.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(greenbone.targets) != 2 {
+		t.Fatalf("target requests = %d, want 2", len(greenbone.targets))
+	}
+	for _, target := range greenbone.targets {
+		switch {
+		case strings.Contains(target.Name, "_WAN_"):
+			if target.AliveTest != gmp.AliveTestConsiderAlive {
+				t.Errorf("WAN alive test = %q, want %q", target.AliveTest, gmp.AliveTestConsiderAlive)
+			}
+		case strings.Contains(target.Name, "_PrivateIP_"):
+			if target.AliveTest != "" {
+				t.Errorf("private alive test = %q, want scanner default", target.AliveTest)
+			}
+		default:
+			t.Errorf("unexpected target name %q", target.Name)
+		}
+	}
+}
+
 func TestReconcilerRefusesForeignResource(t *testing.T) {
 	t.Parallel()
 
@@ -401,6 +437,30 @@ func TestGMPHostSpecificationsPreserveExactAddresses(t *testing.T) {
 	want := []string{"7.7.7.7", "10.1.0.0-10.1.0.255", "192.168.10.0"}
 	if got := gmpHostSpecifications(prefixes); !slices.Equal(got, want) {
 		t.Errorf("gmpHostSpecifications() = %v, want %v", got, want)
+	}
+}
+
+func TestPrefixEnd(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		prefix string
+		want   string
+	}{
+		{prefix: "0.0.0.0/0", want: "255.255.255.255"},
+		{prefix: "10.1.2.128/25", want: "10.1.2.255"},
+		{prefix: "192.168.10.7/32", want: "192.168.10.7"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.prefix, func(t *testing.T) {
+			t.Parallel()
+
+			prefix := netip.MustParsePrefix(test.prefix)
+			if got := prefixEnd(prefix).String(); got != test.want {
+				t.Errorf("prefixEnd(%s) = %s, want %s", test.prefix, got, test.want)
+			}
+		})
 	}
 }
 
