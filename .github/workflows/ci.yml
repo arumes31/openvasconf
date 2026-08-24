@@ -127,7 +127,7 @@ jobs:
             --network none \
             --cap-drop ALL \
             --security-opt no-new-privileges \
-            --tmpfs /data:rw,noexec,nosuid,size=16m \
+            --tmpfs /data:rw,noexec,nosuid,size=16m,uid=1001,gid=1001,mode=0700 \
             --tmpfs /tmp:rw,noexec,nosuid,size=16m \
             --entrypoint /bin/sh \
             --env OPENVASCONF_ADMIN_PASSWORD=ci-verification-only \

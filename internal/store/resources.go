@@ -17,8 +17,6 @@ func (s *Store) ManagedResources(ctx context.Context, customerID string) ([]Mana
 	if err != nil {
 		return nil, fmt.Errorf("querying managed resources: %w", err)
 	}
-	defer rows.Close()
-
 	result := make([]ManagedResource, 0)
 	for rows.Next() {
 		var value ManagedResource
@@ -35,16 +33,19 @@ func (s *Store) ManagedResources(ctx context.Context, customerID string) ([]Mana
 			&value.LastError,
 			&updatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scanning managed resource: %w", err)
+			return nil, closeRows(rows, "managed resources query", fmt.Errorf("scanning managed resource: %w", err))
 		}
 		value.UpdatedAt, err = parseTime(updatedAt)
 		if err != nil {
-			return nil, err
+			return nil, closeRows(rows, "managed resources query", err)
 		}
 		result = append(result, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating managed resources: %w", err)
+		return nil, closeRows(rows, "managed resources query", fmt.Errorf("iterating managed resources: %w", err))
+	}
+	if err := closeRows(rows, "managed resources query", nil); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -131,8 +132,6 @@ func (s *Store) AuditEvents(ctx context.Context, limit int) ([]AuditEvent, error
 	if err != nil {
 		return nil, fmt.Errorf("querying audit events: %w", err)
 	}
-	defer rows.Close()
-
 	result := make([]AuditEvent, 0)
 	for rows.Next() {
 		var event AuditEvent
@@ -146,16 +145,19 @@ func (s *Store) AuditEvents(ctx context.Context, limit int) ([]AuditEvent, error
 			&event.Detail,
 			&createdAt,
 		); err != nil {
-			return nil, fmt.Errorf("scanning audit event: %w", err)
+			return nil, closeRows(rows, "audit events query", fmt.Errorf("scanning audit event: %w", err))
 		}
 		event.CreatedAt, err = parseTime(createdAt)
 		if err != nil {
-			return nil, err
+			return nil, closeRows(rows, "audit events query", err)
 		}
 		result = append(result, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating audit events: %w", err)
+		return nil, closeRows(rows, "audit events query", fmt.Errorf("iterating audit events: %w", err))
+	}
+	if err := closeRows(rows, "audit events query", nil); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

@@ -127,9 +127,9 @@ func TestExpandNonRangeInputsUnchanged(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"192.168.10.0":   "192.168.10.0/32",
+		"192.168.10.0":    "192.168.10.0/32",
 		"192.168.10.7/32": "192.168.10.7/32",
-		"10.1.2.3/24":    "10.1.2.0/24",
+		"10.1.2.3/24":     "10.1.2.0/24",
 	}
 	for input, want := range cases {
 		prefixes, err := Expand(input)

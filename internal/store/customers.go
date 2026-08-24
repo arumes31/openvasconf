@@ -200,21 +200,19 @@ func (s *Store) ListCustomers(
 	if err != nil {
 		return nil, fmt.Errorf("querying customers: %w", err)
 	}
-	defer rows.Close()
-
 	result := make([]customer.Customer, 0)
 	for rows.Next() {
 		value, err := scanCustomer(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scanning customer: %w", err)
+			return nil, closeRows(rows, "customer query", fmt.Errorf("scanning customer: %w", err))
 		}
 		result = append(result, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating customers: %w", err)
+		return nil, closeRows(rows, "customer query", fmt.Errorf("iterating customers: %w", err))
 	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("closing customer rows: %w", err)
+	if err := closeRows(rows, "customer query", nil); err != nil {
+		return nil, err
 	}
 	for index := range result {
 		result[index].Networks, err = s.networks(ctx, result[index].ID)
@@ -353,8 +351,6 @@ func (s *Store) networks(ctx context.Context, customerID string) ([]customer.Net
 	if err != nil {
 		return nil, fmt.Errorf("querying customer networks: %w", err)
 	}
-	defer rows.Close()
-
 	result := make([]customer.Network, 0)
 	for rows.Next() {
 		var value customer.Network
@@ -367,16 +363,19 @@ func (s *Store) networks(ctx context.Context, customerID string) ([]customer.Net
 			&value.Class,
 			&createdAt,
 		); err != nil {
-			return nil, fmt.Errorf("scanning customer network: %w", err)
+			return nil, closeRows(rows, "customer network query", fmt.Errorf("scanning customer network: %w", err))
 		}
 		value.CreatedAt, err = parseTime(createdAt)
 		if err != nil {
-			return nil, err
+			return nil, closeRows(rows, "customer network query", err)
 		}
 		result = append(result, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating customer networks: %w", err)
+		return nil, closeRows(rows, "customer network query", fmt.Errorf("iterating customer networks: %w", err))
+	}
+	if err := closeRows(rows, "customer network query", nil); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

@@ -142,7 +142,11 @@ func TestReportsListRequiresAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			t.Errorf("closing response body: %v", err)
+		}
+	}()
 	if response.Request.URL.Path != "/login" {
 		t.Fatalf("unauthenticated /reports landed on %q, want /login", response.Request.URL.Path)
 	}
@@ -646,7 +650,11 @@ func TestReportExportRequiresAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			t.Errorf("closing response body: %v", err)
+		}
+	}()
 	if response.Request.URL.Path != "/login" {
 		t.Fatalf("unauthenticated export landed on %q, want /login", response.Request.URL.Path)
 	}

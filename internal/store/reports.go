@@ -296,18 +296,19 @@ func (s *Store) ListReportSnapshots(
 	if err != nil {
 		return nil, fmt.Errorf("querying report snapshots: %w", err)
 	}
-	defer rows.Close()
-
 	result := make([]ReportSnapshot, 0)
 	for rows.Next() {
 		snapshot, err := scanReportSnapshot(rows)
 		if err != nil {
-			return nil, err
+			return nil, closeRows(rows, "report snapshots query", err)
 		}
 		result = append(result, snapshot)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating report snapshots: %w", err)
+		return nil, closeRows(rows, "report snapshots query", fmt.Errorf("iterating report snapshots: %w", err))
+	}
+	if err := closeRows(rows, "report snapshots query", nil); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -331,16 +332,17 @@ func (s *Store) ReportSnapshot(ctx context.Context, id int64) (ReportSnapshot, e
 	if err != nil {
 		return ReportSnapshot{}, fmt.Errorf("querying report snapshot: %w", err)
 	}
-	defer rows.Close()
-
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return ReportSnapshot{}, fmt.Errorf("iterating report snapshot: %w", err)
+			return ReportSnapshot{}, closeRows(rows, "report snapshot query", fmt.Errorf("iterating report snapshot: %w", err))
 		}
-		return ReportSnapshot{}, ErrNotFound
+		return ReportSnapshot{}, closeRows(rows, "report snapshot query", ErrNotFound)
 	}
 	snapshot, err := scanReportSnapshot(rows)
 	if err != nil {
+		return ReportSnapshot{}, closeRows(rows, "report snapshot query", err)
+	}
+	if err := closeRows(rows, "report snapshot query", nil); err != nil {
 		return ReportSnapshot{}, err
 	}
 	return snapshot, nil
@@ -363,8 +365,6 @@ func (s *Store) ReportFindings(
 	if err != nil {
 		return nil, fmt.Errorf("querying finding snapshots: %w", err)
 	}
-	defer rows.Close()
-
 	result := make([]FindingSnapshot, 0)
 	for rows.Next() {
 		var finding FindingSnapshot
@@ -384,7 +384,7 @@ func (s *Store) ReportFindings(
 			&cves,
 			&finding.Remediation,
 		); err != nil {
-			return nil, fmt.Errorf("scanning finding snapshot: %w", err)
+			return nil, closeRows(rows, "finding snapshots query", fmt.Errorf("scanning finding snapshot: %w", err))
 		}
 		if cves != "" {
 			finding.CVEs = strings.Split(cves, ",")
@@ -392,7 +392,10 @@ func (s *Store) ReportFindings(
 		result = append(result, finding)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating finding snapshots: %w", err)
+		return nil, closeRows(rows, "finding snapshots query", fmt.Errorf("iterating finding snapshots: %w", err))
+	}
+	if err := closeRows(rows, "finding snapshots query", nil); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -415,8 +418,6 @@ func (s *Store) PendingReportRetries(
 	if err != nil {
 		return nil, fmt.Errorf("querying pending report retries: %w", err)
 	}
-	defer rows.Close()
-
 	result := make([]ReportSnapshot, 0)
 	for rows.Next() {
 		var snapshot ReportSnapshot
@@ -428,13 +429,16 @@ func (s *Store) PendingReportRetries(
 			&snapshot.CustomerID,
 			&snapshot.ImportAttempts,
 		); err != nil {
-			return nil, fmt.Errorf("scanning pending report retry: %w", err)
+			return nil, closeRows(rows, "pending report retries query", fmt.Errorf("scanning pending report retry: %w", err))
 		}
 		snapshot.ImportState = ImportStateFailed
 		result = append(result, snapshot)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating pending report retries: %w", err)
+		return nil, closeRows(rows, "pending report retries query", fmt.Errorf("iterating pending report retries: %w", err))
+	}
+	if err := closeRows(rows, "pending report retries query", nil); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -514,6 +518,9 @@ func insertFindingChunk(
 			finding.Remediation,
 		)
 	}
+	// The only generated SQL fragments are fixed "(?,...,?)" tuples; all
+	// finding values remain bound parameters.
+	// #nosec G202 -- generated placeholders, never finding text.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO finding_snapshots(
 			snapshot_id, fingerprint, nvt_oid, title, host, port,

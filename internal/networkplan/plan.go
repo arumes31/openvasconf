@@ -287,7 +287,7 @@ func parseRange(raw string) ([]netip.Prefix, error) {
 		for size := block; size > 1; size >>= 1 {
 			bits--
 		}
-		prefixes = append(prefixes, netip.PrefixFrom(ipv4Address(uint32(startNumber)), bits))
+		prefixes = append(prefixes, netip.PrefixFrom(ipv4Address64(startNumber), bits))
 		if block == 1<<32 {
 			break
 		}
@@ -504,4 +504,13 @@ func ipv4Address(value uint32) netip.Addr {
 	var bytes [4]byte
 	binary.BigEndian.PutUint32(bytes[:], value)
 	return netip.AddrFrom4(bytes)
+}
+
+func ipv4Address64(value uint64) netip.Addr {
+	if value > uint64(^uint32(0)) {
+		panic("networkplan: ipv4 address exceeds address space")
+	}
+	var bytes [8]byte
+	binary.BigEndian.PutUint64(bytes[:], value)
+	return netip.AddrFrom4([4]byte(bytes[4:]))
 }

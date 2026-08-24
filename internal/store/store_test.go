@@ -259,7 +259,11 @@ func TestScheduleFreedomMigrationPreservesForeignKeyChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("closing foreign-key check rows: %v", err)
+		}
+	}()
 	if rows.Next() {
 		t.Fatal("foreign_key_check found a violation after upgrade")
 	}

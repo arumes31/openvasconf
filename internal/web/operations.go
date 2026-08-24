@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -97,7 +98,8 @@ func (s *Server) startScan(response http.ResponseWriter, request *http.Request) 
 		http.Error(response, "Greenbone rejected the scan start", http.StatusBadGateway)
 		return
 	}
-	http.Redirect(response, request, "/customers/"+customerID+"?notice=scan-started", http.StatusSeeOther)
+	// #nosec G710 -- customerNoticeURL always returns an encoded same-origin path.
+	http.Redirect(response, request, customerNoticeURL(customerID, "scan-started"), http.StatusSeeOther)
 }
 
 func (s *Server) stopScan(response http.ResponseWriter, request *http.Request) {
@@ -116,7 +118,15 @@ func (s *Server) stopScan(response http.ResponseWriter, request *http.Request) {
 	}
 	// The task state on the page keeps coming from Greenbone polling; the stop
 	// is only confirmed once Greenbone reports it.
-	http.Redirect(response, request, "/customers/"+customerID+"?notice=scan-stop-requested", http.StatusSeeOther)
+	// #nosec G710 -- customerNoticeURL always returns an encoded same-origin path.
+	http.Redirect(response, request, customerNoticeURL(customerID, "scan-stop-requested"), http.StatusSeeOther)
+}
+
+func customerNoticeURL(customerID, notice string) string {
+	return (&url.URL{
+		Path:     "/customers/" + customerID,
+		RawQuery: url.Values{"notice": {notice}}.Encode(),
+	}).String()
 }
 
 // verifiedTask resolves the addressed managed task and confirms that the

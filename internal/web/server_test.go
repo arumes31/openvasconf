@@ -104,12 +104,14 @@ func TestLoginCSRFAndSecurityHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("login status = %d", response.StatusCode)
 	}
 	if response.Header.Get("Content-Security-Policy") == "" {
 		t.Fatal("content security policy header is missing")
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("closing login response body: %v", err)
 	}
 
 	form := url.Values{"username": {"admin"}, "password": {testAdminPassword}}
@@ -122,9 +124,11 @@ func TestLoginCSRFAndSecurityHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatalf("post without csrf status = %d, want %d", response.StatusCode, http.StatusForbidden)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("closing forbidden response body: %v", err)
 	}
 
 	login(t, app)
@@ -132,9 +136,11 @@ func TestLoginCSRFAndSecurityHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("dashboard status = %d", response.StatusCode)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("closing dashboard response body: %v", err)
 	}
 }
 
@@ -156,8 +162,12 @@ func TestCustomerPreviewCreateAndSoftDelete(t *testing.T) {
 			t.Fatalf("preview does not contain %q", expected)
 		}
 	}
+	match := regexp.MustCompile(`name="preview_token" value="([^"]+)"`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatalf("signed preview token not rendered: %s", body)
+	}
 
-	response = postForm(t, app, "/customers", preview)
+	response = postForm(t, app, "/customers", url.Values{"preview_token": {match[1]}})
 	_ = readBody(t, response)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("create final status = %d", response.StatusCode)
@@ -321,10 +331,12 @@ func csrfCookie(t *testing.T, app testWebApp) string {
 
 func readBody(t *testing.T, response *http.Response) string {
 	t.Helper()
-	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("closing response body: %v", err)
 	}
 	return string(body)
 }

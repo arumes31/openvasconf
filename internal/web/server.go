@@ -6,6 +6,7 @@ import (
 	"embed"
 	"html/template"
 	"log/slog"
+	"math/bits"
 	"net/http"
 	"strings"
 	"sync"
@@ -115,11 +116,16 @@ func New(options Options) (*Server, error) {
 			}
 			return false
 		},
-		"percent": func(value, total uint64) int {
+		"percent": func(value, total uint64) uint64 {
 			if total == 0 {
 				return 0
 			}
-			return int(value * 100 / total)
+			if value >= total {
+				return 100
+			}
+			high, low := bits.Mul64(value, 100)
+			percent, _ := bits.Div64(high, low, total)
+			return percent
 		},
 		"taskActive": func(status string) bool {
 			switch strings.ToLower(status) {
