@@ -13,29 +13,29 @@
 {{if .Authenticated}}
 <header class="masthead">
   <a class="brand" href="/"><span class="brand-mark">OV</span><span>openvasconf</span></a>
-  <nav aria-label="Main navigation">
+  <nav class="primary-nav" aria-label="Main navigation">
     <a href="/">Operations</a>
     <a href="/reports">Reports</a>
     <a href="/customers/new">Add customer</a>
     <a href="/import">Portability</a>
     <a href="/settings">Greenbone</a>
   </nav>
-  <form method="post" action="/logout" class="inline-form">
-    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <button class="text-button" type="submit">Lock console</button>
-  </form>
+  <div class="command-cluster">
+    {{if .Health}}<details class="health-strip health-{{.Health.Level}}" aria-label="System health">
+      <summary><span class="health-light" aria-hidden="true"></span><strong>{{.Health.Summary}}</strong><small>{{.Health.CheckedAt.Format "15:04"}}</small></summary>
+      <div class="health-popover"><div class="popover-heading">System components · checked {{.Health.CheckedAt.Format "15:04:05"}}</div>
+        <ul class="health-list">{{range .Health.Components}}<li><span class="status health-state-{{.State}}">{{.State}}</span><strong>{{.Name}}</strong><span>{{.Detail}}</span>{{if .Guidance}}<small>{{.Guidance}}</small>{{end}}{{if .Link}}<a href="{{.Link}}">Details →</a>{{end}}</li>{{end}}</ul>
+      </div>
+    </details>{{end}}
+    <button class="text-button density-toggle" type="button" data-density-toggle aria-pressed="false">Relax density</button>
+    <form method="post" action="/logout" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button class="text-button" type="submit">Lock</button>
+    </form>
+  </div>
 </header>
 {{end}}
 <main class="shell">
-{{if and .Authenticated .Health}}
-<section class="health-strip health-{{.Health.Level}}" aria-label="System health">
-  <span class="health-light" aria-hidden="true"></span>
-  <strong>{{.Health.Summary}}</strong>
-  <details class="health-details"><summary>Components · checked {{.Health.CheckedAt.Format "15:04:05"}}</summary>
-    <ul class="health-list">{{range .Health.Components}}<li><span class="status health-state-{{.State}}">{{.State}}</span><strong>{{.Name}}</strong><span>{{.Detail}}</span>{{if .Guidance}}<small>{{.Guidance}}</small>{{end}}{{if .Link}}<a href="{{.Link}}">Details →</a>{{end}}</li>{{end}}</ul>
-  </details>
-</section>
-{{end}}
 {{if .Error}}<div class="alert alert-error" role="alert"><span>FAULT</span>{{.Error}}</div>{{end}}
 {{if .Notice}}<div class="alert"><span>INFO</span>{{.Notice}}</div>{{end}}
 {{if .GreenboneError}}<div class="alert alert-warn" role="alert"><span>GMP</span>{{.GreenboneError}}</div>{{end}}

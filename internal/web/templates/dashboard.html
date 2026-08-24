@@ -1,21 +1,18 @@
 {{template "head" .}}
 <section class="hero-row">
   <div><p class="eyebrow">CURRENT OPERATING PICTURE</p><h1>Scan operations</h1></div>
-  <div class="button-row"><button class="secondary" type="button" data-compact-toggle>Compact view</button><form method="post" action="/sync"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="primary" type="submit">Synchronize all <span>↻</span></button></form></div>
+  <div class="button-row"><form method="post" action="/sync"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="primary" type="submit">Synchronize all <span>↻</span></button></form></div>
 </section>
 
-<section class="metric-grid">
+<section class="overview-grid" data-operations-url="/api/operations">
   <article class="metric"><span>Visible customers</span><strong>{{len .Customers}}</strong><small>filtered tenants</small></article>
   <article class="metric"><span>GMP link</span><strong class="compact">{{if .GreenboneVersion}}ONLINE{{else}}OFFLINE{{end}}</strong><small>{{if .GreenboneVersion}}version {{.GreenboneVersion}}{{else}}check socket{{end}}</small></article>
   <article class="metric"><span>Default policy</span><strong class="compact">{{if .Settings.ScanConfig.Name}}{{.Settings.ScanConfig.Name}}{{else}}PENDING{{end}}</strong><small>{{.Settings.PortList.Name}}</small></article>
+  <article class="metric live-metric"><span>GMP latency</span><strong class="compact" data-op-latency>Loading…</strong><small>live response</small></article>
+  <article class="metric live-metric"><span>Active scans</span><strong data-op-active>—</strong><small data-op-task>Querying task state</small><small data-op-recent></small></article>
+  <article class="metric live-metric"><span>Feed health</span><strong data-op-feeds>—</strong><small data-op-feed-age>Querying feed versions</small></article>
 </section>
 {{if or (not .Settings.Scanner.ID) (not .Settings.ScanConfig.ID) (not .Settings.PortList.ID)}}<p class="alert alert-warn"><span>DEFAULTS</span>Required scanner, scan configuration, or port-list defaults are missing. <a href="/settings">Configure Greenbone objects.</a></p>{{end}}
-
-<section class="panel operations-strip" data-operations-url="/api/operations">
-  <div><span class="eyebrow">LIVE GREENBONE</span><strong data-op-latency>Loading…</strong><small>GMP response latency</small></div>
-  <div><span>Active scans</span><strong data-op-active>—</strong><small data-op-task>Querying task state</small><small data-op-recent></small></div>
-  <div><span>Feeds</span><strong data-op-feeds>—</strong><small data-op-feed-age>Querying feed versions</small></div>
-</section>
 
 <section class="panel table-panel">
   <div class="section-heading"><div><p class="eyebrow">MANAGED TENANTS</p><h2>Customers</h2></div><div class="button-row"><a class="secondary" href="/import">Import / export</a><a class="secondary" href="/customers/new">+ Add customer</a></div></div>

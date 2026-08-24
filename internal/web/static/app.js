@@ -5,17 +5,18 @@ document.addEventListener("submit", (event) => {
   if (message && !window.confirm(message)) event.preventDefault();
 });
 
-const compactToggle = document.querySelector("[data-compact-toggle]");
-if (compactToggle) {
-  const applyCompact = (enabled) => {
-    document.body.classList.toggle("compact-view", enabled);
-    compactToggle.textContent = enabled ? "Comfortable view" : "Compact view";
+const densityToggle = document.querySelector("[data-density-toggle]");
+if (densityToggle) {
+  const applyComfortable = (enabled) => {
+    document.body.classList.toggle("comfortable-view", enabled);
+    densityToggle.setAttribute("aria-pressed", String(enabled));
+    densityToggle.textContent = enabled ? "Compact density" : "Relax density";
   };
-  applyCompact(window.localStorage.getItem("openvasconf-compact") === "1");
-  compactToggle.addEventListener("click", () => {
-    const enabled = !document.body.classList.contains("compact-view");
-    window.localStorage.setItem("openvasconf-compact", enabled ? "1" : "0");
-    applyCompact(enabled);
+  applyComfortable(window.localStorage.getItem("openvasconf-density") === "comfortable");
+  densityToggle.addEventListener("click", () => {
+    const enabled = !document.body.classList.contains("comfortable-view");
+    window.localStorage.setItem("openvasconf-density", enabled ? "comfortable" : "compact");
+    applyComfortable(enabled);
   });
 }
 
