@@ -18,7 +18,9 @@ func (s *Store) Settings(ctx context.Context) (customer.Settings, error) {
 		       default_scan_config_id, default_scan_config_name,
 		       default_port_list_id, default_port_list_name,
 		       timezone, schedule_weekdays, schedule_start_minute,
-		       schedule_end_minute, updated_at
+		       schedule_end_minute,
+		       sla_critical_days, sla_high_days, sla_medium_days, sla_low_days,
+		       updated_at
 		FROM settings WHERE singleton = 1`).Scan(
 		&settings.InstallationID,
 		&settings.Scanner.ID,
@@ -31,6 +33,10 @@ func (s *Store) Settings(ctx context.Context) (customer.Settings, error) {
 		&weekdaysText,
 		&settings.SchedulePolicy.StartMinute,
 		&settings.SchedulePolicy.EndMinute,
+		&settings.SLA.CriticalDays,
+		&settings.SLA.HighDays,
+		&settings.SLA.MediumDays,
+		&settings.SLA.LowDays,
 		&updatedAt,
 	)
 	if err != nil {
@@ -54,6 +60,9 @@ func (s *Store) UpdateSettings(ctx context.Context, settings customer.Settings) 
 	if err := customer.ValidateSchedulePolicy(settings.SchedulePolicy); err != nil {
 		return fmt.Errorf("updating settings: %w", err)
 	}
+	if err := customer.ValidateSLAPolicy(settings.SLA); err != nil {
+		return fmt.Errorf("updating settings: %w", err)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning settings update: %w", err)
@@ -66,7 +75,9 @@ func (s *Store) UpdateSettings(ctx context.Context, settings customer.Settings) 
 			default_scan_config_id = ?, default_scan_config_name = ?,
 			default_port_list_id = ?, default_port_list_name = ?,
 			timezone = ?, schedule_weekdays = ?, schedule_start_minute = ?,
-			schedule_end_minute = ?, updated_at = ?
+			schedule_end_minute = ?,
+			sla_critical_days = ?, sla_high_days = ?, sla_medium_days = ?,
+			sla_low_days = ?, updated_at = ?
 		WHERE singleton = 1`,
 		settings.Scanner.ID,
 		settings.Scanner.Name,
@@ -78,6 +89,10 @@ func (s *Store) UpdateSettings(ctx context.Context, settings customer.Settings) 
 		customer.FormatWeekdays(settings.SchedulePolicy.Weekdays),
 		settings.SchedulePolicy.StartMinute,
 		settings.SchedulePolicy.EndMinute,
+		settings.SLA.CriticalDays,
+		settings.SLA.HighDays,
+		settings.SLA.MediumDays,
+		settings.SLA.LowDays,
 		nowText(),
 	)
 	if err != nil {

@@ -259,3 +259,36 @@ func serveFakeGMP(
 		_, _ = connection.Write([]byte(response))
 	}
 }
+
+func TestClientStopTask(t *testing.T) {
+	t.Parallel()
+
+	requests := make(chan observedRequest, 1)
+	client := fakeClient(
+		t,
+		[]string{`<stop_task_response status="200" status_text="OK"/>`},
+		requests,
+	)
+	if err := client.StopTask(t.Context(), "task-1"); err != nil {
+		t.Fatalf("StopTask() error = %v", err)
+	}
+	request := <-requests
+	if request.Name != "stop_task" || !strings.Contains(request.XML, `task_id="task-1"`) {
+		t.Errorf("stop request = %#v", request)
+	}
+}
+
+func TestClientStopTaskProtocolError(t *testing.T) {
+	t.Parallel()
+
+	client := fakeClient(
+		t,
+		[]string{`<stop_task_response status="404" status_text="Not found"/>`},
+		nil,
+	)
+	err := client.StopTask(t.Context(), "missing")
+	var protocolError *ProtocolError
+	if !errors.As(err, &protocolError) || protocolError.Status != "404" {
+		t.Fatalf("StopTask() error = %v", err)
+	}
+}

@@ -23,6 +23,8 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+const fixedTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
 var ErrNotFound = errors.New("store: not found")
 
 type Store struct {
@@ -170,8 +172,37 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
-func (s *Store) applyMigration(ctx context.Context, version int, statement string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *Store) applyMigration(ctx context.Context, version int, statement string) (returnErr error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquiring migration connection: %w", err)
+	}
+	defer conn.Close()
+
+	checkForeignKeys := strings.HasPrefix(statement, "-- openvasconf: foreign_keys_off")
+	restoreForeignKeys := false
+	if checkForeignKeys {
+		var foreignKeysEnabled int
+		if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeysEnabled); err != nil {
+			return fmt.Errorf("reading foreign-key enforcement: %w", err)
+		}
+		if foreignKeysEnabled != 0 {
+			if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+				return fmt.Errorf("disabling foreign-key enforcement: %w", err)
+			}
+			restoreForeignKeys = true
+		}
+	}
+	defer func() {
+		if !restoreForeignKeys {
+			return
+		}
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA foreign_keys = ON"); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("restoring foreign-key enforcement: %w", err))
+		}
+	}()
+
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning migration transaction: %w", err)
 	}
@@ -198,6 +229,34 @@ func (s *Store) applyMigration(ctx context.Context, version int, statement strin
 	}
 	if _, err := tx.ExecContext(ctx, statement); err != nil {
 		return fmt.Errorf("executing migration: %w", err)
+	}
+	if checkForeignKeys {
+		rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
+		if err != nil {
+			return fmt.Errorf("checking foreign keys after migration: %w", err)
+		}
+		if rows.Next() {
+			defer rows.Close()
+			var table, parent string
+			var rowID, foreignKeyID int64
+			if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+				return fmt.Errorf("scanning foreign-key violation: %w", err)
+			}
+			return fmt.Errorf(
+				"foreign-key violation after migration: table %q row %d references %q (constraint %d)",
+				table,
+				rowID,
+				parent,
+				foreignKeyID,
+			)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("checking foreign keys after migration: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("closing foreign-key check: %w", err)
+		}
 	}
 	if _, err := tx.ExecContext(
 		ctx,

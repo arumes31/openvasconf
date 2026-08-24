@@ -122,11 +122,11 @@ func (c ExportCustomer) Validate() error {
 	}); err != nil {
 		return err
 	}
-	if c.ScheduleWeekday < Monday || c.ScheduleWeekday > Thursday {
-		return errors.New("customer schedule weekday must be Monday through Thursday")
+	if c.ScheduleWeekday < Monday || c.ScheduleWeekday > Sunday {
+		return errors.New("customer schedule weekday must be Monday through Sunday")
 	}
 	if c.ScheduleMinute < EarliestMinute || c.ScheduleMinute > LatestMinute {
-		return errors.New("customer schedule time must be between 07:00 and 15:00")
+		return errors.New("customer schedule time must be within one day between 00:00 and 23:59")
 	}
 	if _, err := time.LoadLocation(c.Timezone); err != nil {
 		return fmt.Errorf("invalid customer timezone %q: %w", c.Timezone, err)

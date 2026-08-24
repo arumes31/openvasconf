@@ -131,38 +131,72 @@ func Analyze(input Input) (Analysis, error) {
 		return Analysis{}, err
 	}
 	canonical := make([]CanonicalInput, 0, len(input.Networks))
+	intervals := make([]analysisInterval, 0, len(input.Networks))
 	diagnostics := make([]Diagnostic, 0)
 	seen := make(map[netip.Prefix]string, len(input.Networks))
 	for _, raw := range input.Networks {
-		prefix, err := Parse(raw)
+		expanded, err := Expand(raw)
 		if err != nil {
 			return Analysis{}, err
 		}
-		class, err := classify(prefix)
-		if err != nil {
-			return Analysis{}, err
-		}
-		if related, duplicate := seen[prefix]; duplicate {
-			diagnostics = append(diagnostics, Diagnostic{
-				Kind:    "duplicate",
-				Input:   raw,
-				Related: related,
-				Message: fmt.Sprintf("%s duplicates %s and will be scanned once", raw, related),
+		for _, prefix := range expanded {
+			class, err := classify(prefix)
+			if err != nil {
+				return Analysis{}, err
+			}
+			if related, duplicate := seen[prefix]; duplicate {
+				diagnostics = append(diagnostics, Diagnostic{
+					Kind:    "duplicate",
+					Input:   raw,
+					Related: related,
+					Message: fmt.Sprintf("%s duplicates %s and will be scanned once", raw, related),
+				})
+				continue
+			}
+			seen[prefix] = raw
+			canonicalInput := CanonicalInput{Input: raw, Prefix: prefix, Class: class}
+			canonical = append(canonical, canonicalInput)
+			start := uint64(ipv4Number(prefix.Addr()))
+			intervals = append(intervals, analysisInterval{
+				CanonicalInput: canonicalInput,
+				Start:          start,
+				End:            start + addressCount(prefix) - 1,
 			})
-			continue
 		}
-		for _, existing := range canonical {
-			if prefixesOverlap(prefix, existing.Prefix) {
+	}
+	slices.SortStableFunc(intervals, func(left, right analysisInterval) int {
+		switch {
+		case left.Start < right.Start:
+			return -1
+		case left.Start > right.Start:
+			return 1
+		case left.End > right.End:
+			return -1
+		case left.End < right.End:
+			return 1
+		default:
+			return 0
+		}
+	})
+	if len(intervals) > 0 {
+		covered := intervals[0]
+		for _, current := range intervals[1:] {
+			if current.Start <= covered.End {
 				diagnostics = append(diagnostics, Diagnostic{
 					Kind:    "overlap",
-					Input:   raw,
-					Related: existing.Input,
-					Message: fmt.Sprintf("%s overlaps %s; covered addresses will be scanned once", raw, existing.Input),
+					Input:   current.Input,
+					Related: covered.Input,
+					Message: fmt.Sprintf(
+						"%s overlaps %s; covered addresses will be scanned once",
+						current.Input,
+						covered.Input,
+					),
 				})
 			}
+			if current.End > covered.End {
+				covered = current
+			}
 		}
-		seen[prefix] = raw
-		canonical = append(canonical, CanonicalInput{Input: raw, Prefix: prefix, Class: class})
 	}
 	var total uint64
 	for _, target := range plan.Targets {
@@ -176,8 +210,10 @@ func Analyze(input Input) (Analysis, error) {
 	}, nil
 }
 
-func prefixesOverlap(left, right netip.Prefix) bool {
-	return left.Contains(right.Addr()) || right.Contains(left.Addr())
+type analysisInterval struct {
+	CanonicalInput
+	Start uint64
+	End   uint64
 }
 
 func Parse(input string) (netip.Prefix, error) {
@@ -196,6 +232,68 @@ func Parse(input string) (netip.Prefix, error) {
 		return netip.Prefix{}, fmt.Errorf("networkplan: network %q is not ipv4", input)
 	}
 	return prefix.Masked(), nil
+}
+
+// Expand parses a single network input into its canonical set of CIDR
+// prefixes. Besides plain addresses and CIDRs it accepts an inclusive IPv4
+// range written as "start-end" and converts it into the smallest exact set
+// of CIDRs.
+func Expand(input string) ([]netip.Prefix, error) {
+	raw := strings.TrimSpace(input)
+	if raw == "" {
+		return nil, errors.New("networkplan: network is empty")
+	}
+	if strings.Contains(raw, "-") {
+		return parseRange(raw)
+	}
+	prefix, err := Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	return []netip.Prefix{prefix}, nil
+}
+
+func parseRange(raw string) ([]netip.Prefix, error) {
+	parts := strings.Split(raw, "-")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("networkplan: invalid range %q", raw)
+	}
+	start, err := netip.ParseAddr(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return nil, fmt.Errorf("networkplan: parsing range start %q: %w", raw, err)
+	}
+	end, err := netip.ParseAddr(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return nil, fmt.Errorf("networkplan: parsing range end %q: %w", raw, err)
+	}
+	if !start.Is4() || !end.Is4() {
+		return nil, fmt.Errorf("networkplan: range %q is not ipv4", raw)
+	}
+	startNumber := uint64(ipv4Number(start))
+	endNumber := uint64(ipv4Number(end))
+	if startNumber > endNumber {
+		return nil, fmt.Errorf("networkplan: range %q starts after its end", raw)
+	}
+
+	prefixes := make([]netip.Prefix, 0, 8)
+	for startNumber <= endNumber {
+		remaining := endNumber - startNumber + 1
+		block := uint64(1)
+		// Grow the block while it stays aligned and within the range.
+		for block<<1 <= remaining && startNumber%(block<<1) == 0 && block < 1<<32 {
+			block <<= 1
+		}
+		bits := 32
+		for size := block; size > 1; size >>= 1 {
+			bits--
+		}
+		prefixes = append(prefixes, netip.PrefixFrom(ipv4Address(uint32(startNumber)), bits))
+		if block == 1<<32 {
+			break
+		}
+		startNumber += block
+	}
+	return prefixes, nil
 }
 
 func SafeName(name string) string {
@@ -226,21 +324,23 @@ func SafeName(name string) string {
 func parseAndExpand(inputs []string) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(inputs))
 	for _, input := range inputs {
-		prefix, err := Parse(input)
+		expanded, err := Expand(input)
 		if err != nil {
 			return nil, err
 		}
-		expanded, err := split(prefix)
-		if err != nil {
-			return nil, err
+		for _, prefix := range expanded {
+			splitted, err := split(prefix)
+			if err != nil {
+				return nil, err
+			}
+			if len(prefixes)+len(splitted) > maxExpandedPrefixes {
+				return nil, fmt.Errorf(
+					"networkplan: expanded network count exceeds safety limit %d",
+					maxExpandedPrefixes,
+				)
+			}
+			prefixes = append(prefixes, splitted...)
 		}
-		if len(prefixes)+len(expanded) > maxExpandedPrefixes {
-			return nil, fmt.Errorf(
-				"networkplan: expanded network count exceeds safety limit %d",
-				maxExpandedPrefixes,
-			)
-		}
-		prefixes = append(prefixes, expanded...)
 	}
 	return prefixes, nil
 }

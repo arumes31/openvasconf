@@ -141,6 +141,18 @@ func (c *Client) StartTask(ctx context.Context, taskID string) (string, error) {
 	return response.ReportID, nil
 }
 
+func (c *Client) StopTask(ctx context.Context, taskID string) error {
+	request := struct {
+		XMLName xml.Name `xml:"stop_task"`
+		TaskID  string   `xml:"task_id,attr"`
+	}{TaskID: taskID}
+	var response responseStatus
+	if err := c.call(ctx, request, &response); err != nil {
+		return err
+	}
+	return checkStatus("stop_task", response)
+}
+
 func (c *Client) InspectResource(
 	ctx context.Context,
 	kind,

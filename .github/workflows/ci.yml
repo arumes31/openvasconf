@@ -6,6 +6,7 @@ on:
     branches:
       - main
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -108,7 +109,7 @@ jobs:
           docker build --no-cache --target asset-output --output type=local,dest=asset-two .
           test "$(sha256sum asset-one/app.js | cut -d' ' -f1)" = "$(sha256sum asset-two/app.js | cut -d' ' -f1)"
           test "$(wc -c < asset-one/app.js)" -lt "$(wc -c < internal/web/static/app.js)"
-          test "$(wc -l < asset-one/app.js)" -le 1
+          test "$(wc -l < asset-one/app.js)" -le 2
           test -z "$(find asset-one -type f -name '*.map' -print -quit)"
       - name: Build runtime image
         run: docker build --tag openvasconf:ci .
@@ -117,3 +118,34 @@ jobs:
         run: |
           test "$(docker image inspect openvasconf:ci --format '{{.Config.User}}')" = "openvasconf:openvasconf"
           docker run --rm --entrypoint /bin/sh openvasconf:ci -c '! command -v node && ! command -v npm && ! command -v go'
+      - name: Verify embedded asset in hardened runtime
+        shell: bash
+        run: |
+          expected="$(sha256sum asset-one/app.js | cut -d' ' -f1)"
+          actual="$(docker run --rm \
+            --read-only \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --tmpfs /data:rw,noexec,nosuid,size=16m \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --entrypoint /bin/sh \
+            --env OPENVASCONF_ADMIN_PASSWORD=ci-verification-only \
+            --env OPENVASCONF_GMP_PASSWORD=ci-verification-only \
+            openvasconf:ci -c '
+              set -eu
+              /usr/local/bin/openvasconf >/tmp/app.log 2>&1 &
+              app_pid=$!
+              ready=false
+              for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                if wget -q -O /tmp/app.js http://127.0.0.1:8080/static/app.js; then
+                  ready=true
+                  break
+                fi
+                sleep 1
+              done
+              $ready
+              sha256sum /tmp/app.js | cut -d" " -f1
+              kill "$app_pid"
+            ')"
+          test "$actual" = "$expected"

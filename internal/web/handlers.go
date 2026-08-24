@@ -132,6 +132,10 @@ func noticeText(value string) string {
 	switch value {
 	case "sync-requested":
 		return "Full reconciliation requested."
+	case "scan-started":
+		return "Scan start requested."
+	case "scan-stop-requested":
+		return "Stop requested; the displayed state updates once Greenbone reports it."
 	case "customer-sync-requested":
 		return "Customer reconciliation requested."
 	case "bulk-sync-requested":
@@ -140,6 +144,10 @@ func noticeText(value string) string {
 		return "Select at least one customer."
 	case "import-applied":
 		return "Imported desired state applied and reconciliation queued."
+	case "report-sync-requested":
+		return "Report synchronization requested; new snapshots appear after the next cycle."
+	case "annotation-saved":
+		return "Finding annotation saved; it applies to future snapshots of this customer too."
 	default:
 		return ""
 	}

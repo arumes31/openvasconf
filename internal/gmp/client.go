@@ -53,7 +53,30 @@ func NewWithDialer(username, password string, timeout time.Duration, dial DialFu
 	}
 }
 
+const defaultResponseLimit = 32 << 20
+
 func (c *Client) call(ctx context.Context, request, response any) error {
+	return c.callWithLimit(ctx, request, response, defaultResponseLimit)
+}
+
+// callWithLimit behaves like call but caps the response at maxBytes instead of
+// the default limit. Large responses such as reports use a higher limit.
+func (c *Client) callWithLimit(ctx context.Context, request, response any, maxBytes int64) error {
+	return c.streamCall(ctx, request, maxBytes, func(decoder *xml.Decoder) error {
+		return decoder.Decode(response)
+	})
+}
+
+// streamCall authenticates on a fresh connection, sends one command, and hands
+// the response stream to consume instead of decoding a complete document. The
+// stream is capped at maxBytes; exceeding the limit fails the consume function
+// with errResponseTooLarge.
+func (c *Client) streamCall(
+	ctx context.Context,
+	request any,
+	maxBytes int64,
+	consume func(decoder *xml.Decoder) error,
+) error {
 	connection, err := c.dial(ctx, "unix", c.socketPath)
 	if err != nil {
 		return fmt.Errorf("gmp: connecting to unix socket: %w", err)
@@ -69,7 +92,7 @@ func (c *Client) call(ctx context.Context, request, response any) error {
 	}
 
 	encoder := xml.NewEncoder(connection)
-	decoder := xml.NewDecoder(io.LimitReader(connection, 32<<20))
+	decoder := xml.NewDecoder(&byteLimitReader{reader: connection, remaining: maxBytes})
 	authRequest := authenticateRequest{
 		Credentials: credentials{
 			Username: c.username,
@@ -83,10 +106,38 @@ func (c *Client) call(ctx context.Context, request, response any) error {
 	if err := checkStatus("authenticate", authResponse); err != nil {
 		return err
 	}
-	if err := exchange(encoder, decoder, request, response); err != nil {
+	if err := encoder.Encode(request); err != nil {
+		return fmt.Errorf("gmp: encoding request: %w", err)
+	}
+	if err := encoder.Flush(); err != nil {
+		return fmt.Errorf("gmp: flushing request: %w", err)
+	}
+	if err := consume(decoder); err != nil {
 		return fmt.Errorf("gmp: exchanging command: %w", err)
 	}
 	return nil
+}
+
+var errResponseTooLarge = errors.New("gmp: response exceeds the configured byte limit")
+
+// byteLimitReader fails with errResponseTooLarge instead of a silent EOF once
+// the byte budget is exhausted, so truncated streams are distinguishable from
+// complete short responses.
+type byteLimitReader struct {
+	reader    io.Reader
+	remaining int64
+}
+
+func (r *byteLimitReader) Read(buffer []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, errResponseTooLarge
+	}
+	if int64(len(buffer)) > r.remaining {
+		buffer = buffer[:r.remaining]
+	}
+	read, err := r.reader.Read(buffer)
+	r.remaining -= int64(read)
+	return read, err
 }
 
 func exchange(encoder *xml.Encoder, decoder *xml.Decoder, request, response any) error {

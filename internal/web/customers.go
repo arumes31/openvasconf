@@ -291,7 +291,7 @@ func (s *Server) customerFromForm(
 	}
 	inputs := splitNetworkInputs(form.Networks)
 	if len(inputs) == 0 {
-		return customer.Customer{}, networkplan.Plan{}, form, errors.New("enter at least one ipv4 address or cidr")
+		return customer.Customer{}, networkplan.Plan{}, form, errors.New("enter at least one ipv4 address, cidr, or start-end range")
 	}
 	plan, err := networkplan.Build(networkplan.Input{
 		CustomerName: form.Name,
@@ -331,8 +331,8 @@ func (s *Server) customerFromForm(
 	}
 	if weekdayText, timeText := request.PostForm.Get("schedule_weekday"), request.PostForm.Get("schedule_time"); weekdayText != "" || timeText != "" {
 		weekday, parseErr := strconv.Atoi(weekdayText)
-		if parseErr != nil || weekday < customer.Monday || weekday > customer.Thursday {
-			return customer.Customer{}, networkplan.Plan{}, form, errors.New("schedule weekday must be Monday through Thursday")
+		if parseErr != nil || weekday < customer.Monday || weekday > customer.Sunday {
+			return customer.Customer{}, networkplan.Plan{}, form, errors.New("schedule weekday must be Monday through Sunday")
 		}
 		parsedTime, parseErr := time.Parse("15:04", timeText)
 		if parseErr != nil {
@@ -340,7 +340,7 @@ func (s *Server) customerFromForm(
 		}
 		minute := parsedTime.Hour()*60 + parsedTime.Minute()
 		if minute < customer.EarliestMinute || minute > customer.LatestMinute {
-			return customer.Customer{}, networkplan.Plan{}, form, errors.New("schedule time must be between 07:00 and 15:00")
+			return customer.Customer{}, networkplan.Plan{}, form, errors.New("schedule time must be within one day between 00:00 and 23:59")
 		}
 		value.ScheduleWeekday, value.ScheduleMinute = weekday, minute
 	}
@@ -378,32 +378,34 @@ func (s *Server) customerFromForm(
 
 	seen := make(map[string]struct{}, len(inputs))
 	for _, input := range inputs {
-		prefix, parseErr := networkplan.Parse(input)
-		if parseErr != nil {
-			return customer.Customer{}, networkplan.Plan{}, form, parseErr
+		prefixes, expandErr := networkplan.Expand(input)
+		if expandErr != nil {
+			return customer.Customer{}, networkplan.Plan{}, form, expandErr
 		}
-		if _, duplicate := seen[prefix.String()]; duplicate {
-			continue
+		for _, prefix := range prefixes {
+			if _, duplicate := seen[prefix.String()]; duplicate {
+				continue
+			}
+			seen[prefix.String()] = struct{}{}
+			inputPlan, buildErr := networkplan.Build(networkplan.Input{
+				CustomerName: form.Name,
+				Networks:     []string{prefix.String()},
+			})
+			if buildErr != nil {
+				return customer.Customer{}, networkplan.Plan{}, form, buildErr
+			}
+			networkID, idErr := id.New()
+			if idErr != nil {
+				return customer.Customer{}, networkplan.Plan{}, form, idErr
+			}
+			value.Networks = append(value.Networks, customer.Network{
+				ID:         networkID,
+				CustomerID: value.ID,
+				Input:      input,
+				Prefix:     prefix.String(),
+				Class:      string(inputPlan.Targets[0].Class),
+			})
 		}
-		seen[prefix.String()] = struct{}{}
-		inputPlan, buildErr := networkplan.Build(networkplan.Input{
-			CustomerName: form.Name,
-			Networks:     []string{prefix.String()},
-		})
-		if buildErr != nil {
-			return customer.Customer{}, networkplan.Plan{}, form, buildErr
-		}
-		networkID, idErr := id.New()
-		if idErr != nil {
-			return customer.Customer{}, networkplan.Plan{}, form, idErr
-		}
-		value.Networks = append(value.Networks, customer.Network{
-			ID:         networkID,
-			CustomerID: value.ID,
-			Input:      input,
-			Prefix:     prefix.String(),
-			Class:      string(inputPlan.Targets[0].Class),
-		})
 	}
 	return value, plan, form, nil
 }

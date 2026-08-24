@@ -80,6 +80,7 @@ type Settings struct {
 	PortList       Selection
 	Timezone       string
 	SchedulePolicy SchedulePolicy
+	SLA            SLAPolicy
 	UpdatedAt      time.Time
 }
 
@@ -87,6 +88,24 @@ type SchedulePolicy struct {
 	Weekdays    []int
 	StartMinute int
 	EndMinute   int
+}
+
+// SLAPolicy maps severity bands to allowed remediation durations in days.
+// A band with 0 days means the finding is due immediately.
+type SLAPolicy struct {
+	CriticalDays int
+	HighDays     int
+	MediumDays   int
+	LowDays      int
+}
+
+// ValidateSLAPolicy rejects negative remediation durations.
+func ValidateSLAPolicy(policy SLAPolicy) error {
+	if policy.CriticalDays < 0 || policy.HighDays < 0 ||
+		policy.MediumDays < 0 || policy.LowDays < 0 {
+		return errors.New("customer: sla durations must not be negative")
+	}
+	return nil
 }
 
 type ReconciliationProgress struct {

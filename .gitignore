@@ -3,7 +3,6 @@
 /secrets/
 /docs/
 /test-artifacts/
-/deploy/greenbone-compose.yaml
 *.db
 *.db-shm
 *.db-wal
@@ -25,3 +24,4 @@ image-digest.txt
 Thumbs.db
 /.idea/
 /.vscode/
+/graphify-out/

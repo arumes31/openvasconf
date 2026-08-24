@@ -14,6 +14,9 @@ func weeklyCalendar(value customer.Customer) string {
 		2: "TU",
 		3: "WE",
 		4: "TH",
+		5: "FR",
+		6: "SA",
+		7: "SU",
 	}
 	base := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 	date := base.AddDate(0, 0, value.ScheduleWeekday-1)

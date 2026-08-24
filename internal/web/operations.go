@@ -17,6 +17,7 @@ type operationalGreenbone interface {
 	Feeds(ctx context.Context) ([]gmp.Feed, error)
 	Tasks(ctx context.Context) ([]gmp.TaskStatus, error)
 	StartTask(ctx context.Context, taskID string) (string, error)
+	StopTask(ctx context.Context, taskID string) error
 	InspectResource(ctx context.Context, kind, resourceID string) (gmp.ResourceDetails, error)
 }
 
@@ -83,16 +84,57 @@ func (s *Server) settingsTest(response http.ResponseWriter, request *http.Reques
 }
 
 func (s *Server) startScan(response http.ResponseWriter, request *http.Request) {
+	task, customerID, ok := s.verifiedTask(response, request)
+	if !ok {
+		return
+	}
+	operations, castable := s.greenbone.(operationalGreenbone)
+	if !castable {
+		http.Error(response, "scan start is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := operations.StartTask(request.Context(), task.GVMID); err != nil {
+		http.Error(response, "Greenbone rejected the scan start", http.StatusBadGateway)
+		return
+	}
+	http.Redirect(response, request, "/customers/"+customerID+"?notice=scan-started", http.StatusSeeOther)
+}
+
+func (s *Server) stopScan(response http.ResponseWriter, request *http.Request) {
+	task, customerID, ok := s.verifiedTask(response, request)
+	if !ok {
+		return
+	}
+	operations, castable := s.greenbone.(operationalGreenbone)
+	if !castable {
+		http.Error(response, "scan stop is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if err := operations.StopTask(request.Context(), task.GVMID); err != nil {
+		http.Error(response, "Greenbone rejected the scan stop", http.StatusBadGateway)
+		return
+	}
+	// The task state on the page keeps coming from Greenbone polling; the stop
+	// is only confirmed once Greenbone reports it.
+	http.Redirect(response, request, "/customers/"+customerID+"?notice=scan-stop-requested", http.StatusSeeOther)
+}
+
+// verifiedTask resolves the addressed managed task and confirms that the
+// remote object still carries our ownership marker before any control action.
+func (s *Server) verifiedTask(
+	response http.ResponseWriter,
+	request *http.Request,
+) (store.ManagedResource, string, bool) {
 	customerID := request.PathValue("id")
 	sequence, err := strconv.Atoi(request.PathValue("sequence"))
 	if err != nil || request.PathValue("kind") != "task" {
 		http.NotFound(response, request)
-		return
+		return store.ManagedResource{}, "", false
 	}
 	resources, err := s.repository.ManagedResources(request.Context(), customerID)
 	if err != nil {
 		s.internalError(response, err)
-		return
+		return store.ManagedResource{}, "", false
 	}
 	var task store.ManagedResource
 	for _, resource := range resources {
@@ -103,23 +145,19 @@ func (s *Server) startScan(response http.ResponseWriter, request *http.Request) 
 	}
 	if task.GVMID == "" || task.State != "applied" {
 		http.Error(response, "managed task is not ready", http.StatusConflict)
-		return
+		return store.ManagedResource{}, "", false
 	}
-	operations, ok := s.greenbone.(operationalGreenbone)
-	if !ok {
-		http.Error(response, "scan start is unavailable", http.StatusServiceUnavailable)
-		return
+	operations, castable := s.greenbone.(operationalGreenbone)
+	if !castable {
+		http.Error(response, "task control is unavailable", http.StatusServiceUnavailable)
+		return store.ManagedResource{}, "", false
 	}
 	details, err := operations.InspectResource(request.Context(), "task", task.GVMID)
 	if err != nil || !strings.Contains(details.Comment, task.OwnershipMarker) {
 		http.Error(response, "task ownership could not be verified", http.StatusConflict)
-		return
+		return store.ManagedResource{}, "", false
 	}
-	if _, err := operations.StartTask(request.Context(), task.GVMID); err != nil {
-		http.Error(response, "Greenbone rejected the scan start", http.StatusBadGateway)
-		return
-	}
-	http.Redirect(response, request, "/customers/"+customerID+"?notice=scan-started", http.StatusSeeOther)
+	return task, customerID, true
 }
 
 func (s *Server) apiCustomerDrift(response http.ResponseWriter, request *http.Request) {
