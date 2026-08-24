@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,16 +33,17 @@ const (
 )
 
 type helperConfig struct {
-	SocketPath  string
-	StatePath   string
-	BackupDir   string
-	ComposeFile string
-	Project     string
-	GMPSocket   string
-	GMPUsername string
-	GMPPassword string
-	Timezone    string
-	Timeout     time.Duration
+	SocketPath   string
+	StatePath    string
+	BackupDir    string
+	ComposeFile  string
+	Project      string
+	GMPSocket    string
+	GMPUsername  string
+	GMPPassword  string
+	UpdaterImage string
+	Timezone     string
+	Timeout      time.Duration
 }
 
 func main() {
@@ -189,16 +191,17 @@ func loadConfig() (helperConfig, error) {
 		}
 	}
 	config := helperConfig{
-		SocketPath:  envValue("OPENVASCONF_UPDATER_SOCKET", defaultSocketPath),
-		StatePath:   envValue("OPENVASCONF_UPDATER_STATE", defaultStatePath),
-		BackupDir:   envValue("OPENVASCONF_UPDATER_BACKUPS", defaultBackupDir),
-		ComposeFile: envValue("OPENVASCONF_UPDATER_COMPOSE_FILE", defaultComposeFile),
-		Project:     envValue("OPENVASCONF_UPDATER_PROJECT", defaultProject),
-		GMPSocket:   envValue("OPENVASCONF_GMP_SOCKET", defaultGMPSocket),
-		GMPUsername: envValue("OPENVASCONF_GMP_USERNAME", defaultGMPUsername),
-		GMPPassword: password,
-		Timezone:    envValue("OPENVASCONF_TIMEZONE", defaultTimezone),
-		Timeout:     timeout,
+		SocketPath:   envValue("OPENVASCONF_UPDATER_SOCKET", defaultSocketPath),
+		StatePath:    envValue("OPENVASCONF_UPDATER_STATE", defaultStatePath),
+		BackupDir:    envValue("OPENVASCONF_UPDATER_BACKUPS", defaultBackupDir),
+		ComposeFile:  envValue("OPENVASCONF_UPDATER_COMPOSE_FILE", defaultComposeFile),
+		Project:      envValue("OPENVASCONF_UPDATER_PROJECT", defaultProject),
+		GMPSocket:    envValue("OPENVASCONF_GMP_SOCKET", defaultGMPSocket),
+		GMPUsername:  envValue("OPENVASCONF_GMP_USERNAME", defaultGMPUsername),
+		GMPPassword:  password,
+		UpdaterImage: strings.TrimSpace(os.Getenv("OPENVASCONF_UPDATER_IMAGE")),
+		Timezone:     envValue("OPENVASCONF_TIMEZONE", defaultTimezone),
+		Timeout:      timeout,
 	}
 	for name, path := range map[string]string{
 		"OPENVASCONF_UPDATER_SOCKET":       config.SocketPath,
@@ -214,7 +217,24 @@ func loadConfig() (helperConfig, error) {
 	if _, err := time.LoadLocation(config.Timezone); err != nil {
 		return helperConfig{}, fmt.Errorf("invalid OPENVASCONF_TIMEZONE: %w", err)
 	}
+	if err := validateImmutableImage(config.UpdaterImage); err != nil {
+		return helperConfig{}, err
+	}
 	return config, nil
+}
+
+func validateImmutableImage(value string) error {
+	const separator = "@sha256:"
+	index := strings.LastIndex(value, separator)
+	if index <= 0 {
+		return errors.New("OPENVASCONF_UPDATER_IMAGE must use an immutable repository@sha256 digest")
+	}
+	digest := value[index+len(separator):]
+	decoded, err := hex.DecodeString(digest)
+	if err != nil || len(decoded) != 32 {
+		return errors.New("OPENVASCONF_UPDATER_IMAGE must contain a valid 64-character sha256 digest")
+	}
+	return nil
 }
 
 func listenUnix(path string) (net.Listener, error) {

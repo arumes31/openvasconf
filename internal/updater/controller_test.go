@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,13 +34,14 @@ func (s *memoryStateStore) Save(state persistentState) error {
 }
 
 type fakeRuntime struct {
-	mu          sync.Mutex
-	before      []Image
-	after       []Image
-	appliedFeed bool
-	applied     bool
-	rolledBack  bool
-	backup      bool
+	mu           sync.Mutex
+	before       []Image
+	after        []Image
+	appliedFeed  bool
+	applied      bool
+	rolledBack   bool
+	backup       bool
+	rollbackPath string
 }
 
 func (r *fakeRuntime) Validate(context.Context) error { return nil }
@@ -78,10 +82,11 @@ func (r *fakeRuntime) Backup(context.Context, string) (string, error) {
 	return "/backups/test.dump", nil
 }
 
-func (r *fakeRuntime) Rollback(context.Context, []Image, string) error {
+func (r *fakeRuntime) Rollback(_ context.Context, _ []Image, backupPath string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.rolledBack = true
+	r.rollbackPath = backupPath
 	return nil
 }
 
@@ -93,6 +98,12 @@ func (r *fakeRuntime) state() (appliedFeed, applied, rolledBack, backup bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.appliedFeed, r.applied, r.rolledBack, r.backup
+}
+
+func (r *fakeRuntime) restoredBackup() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rollbackPath
 }
 
 type fakeScanner struct {
@@ -228,6 +239,90 @@ func TestControllerRollsBackAndPausesAfterFailedVerification(t *testing.T) {
 	}
 	if !status.AutomationPaused {
 		t.Fatal("automation was not paused after rollback")
+	}
+}
+
+func TestControllerRecoversInterruptedStackWithPersistedBackup(t *testing.T) {
+	t.Parallel()
+
+	const backupPath = "/backups/restart.dump"
+	policy := DefaultPolicy("UTC")
+	policy.FeedEnabled = false
+	policy.StackEnabled = false
+	stateStore := &memoryStateStore{state: persistentState{
+		Policy: policy,
+		Active: &Operation{
+			ID:           "interrupted-stack",
+			Kind:         KindStack,
+			Trigger:      TriggerAdmin,
+			State:        StateRunning,
+			Phase:        "applying",
+			StartedAt:    time.Now().UTC(),
+			ImagesBefore: []Image{{Service: "gvmd", ID: testImageID}},
+		},
+		BackupPath:  backupPath,
+		Idempotency: map[string]string{},
+	}}
+	runtime := &fakeRuntime{}
+	controller, err := NewController(ControllerOptions{
+		Runtime:          runtime,
+		Scanner:          &fakeScanner{runtime: runtime},
+		Store:            stateStore,
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		DefaultPolicy:    policy,
+		ScheduleInterval: time.Hour,
+		PollInterval:     time.Millisecond,
+		OperationTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := controller.Start(ctx); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	waitForTerminal(t, controller, "interrupted-stack")
+	cancel()
+	controller.Close()
+
+	if got := runtime.restoredBackup(); got != backupPath {
+		t.Errorf("Rollback() backup path = %q, want %q", got, backupPath)
+	}
+}
+
+func TestFileStateStorePersistsBackupPathOutsideOperation(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	store, err := NewFileStateStore(filepath.Join(directory, "updater.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const backupPath = "/backups/persisted.dump"
+	state := persistentState{
+		Active:     &Operation{ID: "operation", Backup: "/backups/not-serialized.dump"},
+		BackupPath: backupPath,
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(directory, "updater.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), `"backup_path": "/backups/persisted.dump"`) {
+		t.Fatalf("state file does not contain persisted backup path: %s", contents)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.BackupPath != backupPath {
+		t.Errorf("loaded backup path = %q, want %q", loaded.BackupPath, backupPath)
+	}
+	if loaded.Active == nil || loaded.Active.Backup != "" {
+		t.Errorf("operation backup was unexpectedly serialized: %#v", loaded.Active)
 	}
 }
 

@@ -38,6 +38,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Reject vulnerable OpenPGP packages
+        shell: bash
+        run: |
+          dependencies="$(go list -deps ./...)"
+          if grep -Eq '^golang\.org/x/crypto/openpgp(/|$)' <<< "$dependencies"; then
+            echo "GO-2026-5932 affected OpenPGP package found in the dependency graph"
+            exit 1
+          fi
       - name: Install scanners
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0

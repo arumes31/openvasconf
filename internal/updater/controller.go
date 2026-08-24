@@ -51,6 +51,7 @@ type persistentState struct {
 	AutomationPaused bool              `json:"automation_paused"`
 	PauseReason      string            `json:"pause_reason,omitempty"`
 	Active           *Operation        `json:"active,omitempty"`
+	BackupPath       string            `json:"backup_path,omitempty"`
 	History          []Operation       `json:"history"`
 	Images           []Image           `json:"images"`
 	Feeds            []Feed            `json:"feeds"`
@@ -143,6 +144,9 @@ func (c *Controller) Start(parent context.Context) error {
 	}
 	c.ctx, c.cancel = context.WithCancel(parent)
 	interrupted := cloneOperation(c.state.Active)
+	if interrupted != nil {
+		interrupted.Backup = c.state.BackupPath
+	}
 	c.mu.Unlock()
 
 	if err := c.runtime.Validate(c.ctx); err != nil {
@@ -247,7 +251,8 @@ func (c *Controller) Trigger(
 		ID: operationID, Kind: kind, Trigger: request.Trigger,
 		State: StateQueued, Phase: "queued", StartedAt: c.now().UTC(),
 	}
-	c.state.Active = &operation
+	c.state.Active = cloneOperation(&operation)
+	c.state.BackupPath = ""
 	c.state.Idempotency[request.IdempotencyKey] = operation.ID
 	c.trimIdempotencyLocked()
 	c.mu.Unlock()
@@ -452,7 +457,9 @@ func (c *Controller) runStack(
 	if err != nil {
 		return err
 	}
-	c.setBackup(operationID, backup)
+	if err := c.setBackup(operationID, backup); err != nil {
+		return fmt.Errorf("persisting stack checkpoint: %w", err)
+	}
 	c.phase(operationID, StateRunning, "staging", "Pulling approved Greenbone service images.")
 	if err := c.runtime.PullStack(ctx); err != nil {
 		return err
@@ -602,13 +609,14 @@ func (c *Controller) setImages(operationID string, before, after []Image) {
 	c.persistBestEffort()
 }
 
-func (c *Controller) setBackup(operationID, backup string) {
+func (c *Controller) setBackup(operationID, backup string) error {
 	c.mu.Lock()
 	if c.state.Active != nil && c.state.Active.ID == operationID {
 		c.state.Active.Backup = backup
+		c.state.BackupPath = backup
 	}
 	c.mu.Unlock()
-	c.persistBestEffort()
+	return c.saveState()
 }
 
 func (c *Controller) finish(operationID string, state State, detail string) {
@@ -623,6 +631,7 @@ func (c *Controller) finish(operationID string, state State, detail string) {
 	c.state.Active.Detail = truncate(detail, 500)
 	c.state.Active.FinishedAt = &now
 	c.state.History = append([]Operation{*cloneOperation(c.state.Active)}, c.state.History...)
+	c.state.BackupPath = ""
 	if len(c.state.History) > maxHistory {
 		c.state.History = c.state.History[:maxHistory]
 	}

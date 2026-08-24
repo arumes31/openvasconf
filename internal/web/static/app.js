@@ -104,24 +104,38 @@ if (syncingRows.length) {
 
 const updaterPanel = document.querySelector("[data-updater-status-url]");
 if (updaterPanel) {
-  const refreshUpdater = () => fetch(updaterPanel.dataset.updaterStatusUrl, {headers: {"Accept": "application/json"}})
-    .then(async (response) => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Updater unavailable");
-      document.querySelectorAll("[data-update-state]").forEach((element) => {
-        element.textContent = data.active ? data.active.state : "IDLE";
+  let updaterRefreshInFlight = false;
+  const refreshUpdater = () => {
+    if (updaterRefreshInFlight) return;
+    updaterRefreshInFlight = true;
+    fetch(updaterPanel.dataset.updaterStatusUrl, {headers: {"Accept": "application/json"}})
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Updater unavailable");
+        document.querySelectorAll("[data-update-state]").forEach((element) => {
+          element.textContent = data.active ? data.active.state : "IDLE";
+        });
+        document.querySelectorAll("[data-update-phase]").forEach((element) => {
+          element.textContent = data.active ? data.active.phase : "no active mutation";
+        });
+        document.querySelectorAll("[data-update-detail]").forEach((element) => {
+          element.textContent = data.active ? data.active.detail : "";
+        });
+      })
+      .catch(() => {
+        document.querySelectorAll("[data-update-state]").forEach((element) => {
+          element.textContent = "OFFLINE";
+        });
+        document.querySelectorAll("[data-update-phase]").forEach((element) => {
+          element.textContent = "status unavailable";
+        });
+        document.querySelectorAll("[data-update-detail]").forEach((element) => {
+          element.textContent = "";
+        });
+      })
+      .finally(() => {
+        updaterRefreshInFlight = false;
       });
-      document.querySelectorAll("[data-update-phase]").forEach((element) => {
-        element.textContent = data.active ? data.active.phase : "no active mutation";
-      });
-      document.querySelectorAll("[data-update-detail]").forEach((element) => {
-        element.textContent = data.active ? data.active.detail : "";
-      });
-    })
-    .catch(() => {
-      document.querySelectorAll("[data-update-state]").forEach((element) => {
-        element.textContent = "OFFLINE";
-      });
-    });
+  };
   window.setInterval(refreshUpdater, 5000);
 }

@@ -440,7 +440,7 @@ Duration values use Go syntax such as `30s`, `1m`, or `12h`.
 | `OPENVASCONF_EXPORT_MAX_ROWS` | `100000` | Maximum finding rows in one export. |
 | `OPENVASCONF_EXPORT_MAX_BYTES` | `52428800` | Maximum export response size in bytes. |
 | `OPENVASCONF_PORT` | `8080` | Compose-only host port substitution; it is not read by the Go process. |
-| `OPENVASCONF_UPDATER_IMAGE` | `ghcr.io/arumes31/openvasconf-updater:edge` | Compose-only updater helper image. Prefer an immutable verified digest. |
+| `OPENVASCONF_UPDATER_IMAGE` | required | Updater helper image as an approved immutable `repository@sha256:<digest>` reference; mutable tags are rejected. |
 | `OPENVASCONF_DOCKER_GID` | `999` | Compose-only supplemental group matching the host Docker socket GID. |
 
 File-based secrets take precedence over direct values. The admin password must
@@ -507,6 +507,7 @@ Set the Docker socket group before starting the complete deployment:
 
 ```bash
 export OPENVASCONF_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+export OPENVASCONF_UPDATER_IMAGE='ghcr.io/arumes31/openvasconf-updater@sha256:<reviewed-manifest-digest>'
 docker compose -f deploy/greenbone-compose.yaml up -d
 ```
 

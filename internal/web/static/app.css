@@ -432,12 +432,15 @@ legend { color: var(--paper-dim); font-size: 8px; letter-spacing: .1em; text-tra
   .health-strip > summary strong { max-width: 120px; }
 }
 
+@media (max-width: 952px) {
+  .update-layout { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 940px) {
   .masthead { grid-template-columns: max-content minmax(250px, 1fr) max-content; }
   .brand > span:last-child, .health-strip > summary strong, .health-strip > summary small, .density-toggle { display: none; }
   .primary-nav { justify-content: flex-start; }
   .editor-grid, .login-grid { grid-template-columns: 1fr; }
-  .update-layout { grid-template-columns: 1fr; }
   .update-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .login-grid { gap: 24px; padding: 30px 0; }
   .form-panel { padding: 14px; }
