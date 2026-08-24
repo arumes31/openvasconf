@@ -113,6 +113,7 @@ func (s *Server) dashboard(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	version, greenboneError := s.greenboneStatus(request.Context())
+	updateStatus, _ := s.updateStatus(request.Context())
 	data := pageData{
 		Title:            "Scan operations",
 		Authenticated:    true,
@@ -123,6 +124,7 @@ func (s *Server) dashboard(response http.ResponseWriter, request *http.Request) 
 		Query:            query,
 		QueryValues:      request.URL.Query(),
 		Notice:           noticeText(request.URL.Query().Get("notice")),
+		UpdateStatus:     updateStatus,
 	}
 	if greenboneError != nil {
 		data.GreenboneError = greenboneError.Error()

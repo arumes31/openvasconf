@@ -13,6 +13,7 @@ const (
 	defaultListenAddress          = "127.0.0.1:8080"
 	defaultDatabasePath           = "data/openvasconf.db"
 	defaultGMPSocketPath          = "/run/gvmd/gvmd.sock"
+	defaultUpdaterSocketPath      = "/run/openvasconf-updater/updater.sock"
 	defaultGMPUsername            = "admin"
 	defaultTimezone               = "Europe/Vienna"
 	defaultReconcileEvery         = time.Minute
@@ -31,6 +32,7 @@ type Config struct {
 	ListenAddress           string
 	DatabasePath            string
 	GMPSocketPath           string
+	UpdaterSocketPath       string
 	GMPUsername             string
 	GMPPassword             string
 	AdminPassword           string
@@ -139,6 +141,7 @@ func load() (Config, []error) {
 		ListenAddress:           value("OPENVASCONF_LISTEN", defaultListenAddress),
 		DatabasePath:            value("OPENVASCONF_DATABASE", defaultDatabasePath),
 		GMPSocketPath:           value("OPENVASCONF_GMP_SOCKET", defaultGMPSocketPath),
+		UpdaterSocketPath:       value("OPENVASCONF_UPDATER_SOCKET", defaultUpdaterSocketPath),
 		GMPUsername:             value("OPENVASCONF_GMP_USERNAME", defaultGMPUsername),
 		GMPPassword:             gmpPassword,
 		AdminPassword:           adminPassword,
@@ -173,6 +176,9 @@ func (c Config) validate() []error {
 	}
 	if strings.TrimSpace(c.GMPSocketPath) == "" {
 		problems = append(problems, errors.New("config: OPENVASCONF_GMP_SOCKET gmp socket path is required"))
+	}
+	if strings.TrimSpace(c.UpdaterSocketPath) == "" {
+		problems = append(problems, errors.New("config: OPENVASCONF_UPDATER_SOCKET updater socket path is required"))
 	}
 	if strings.TrimSpace(c.GMPUsername) == "" {
 		problems = append(problems, errors.New("config: OPENVASCONF_GMP_USERNAME gmp username is required"))

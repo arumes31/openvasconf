@@ -15,6 +15,7 @@ import (
 	"openvasconf/internal/customer"
 	"openvasconf/internal/gmp"
 	"openvasconf/internal/store"
+	"openvasconf/internal/updater"
 )
 
 //go:embed templates/*.html static/*
@@ -24,6 +25,9 @@ type Repository interface {
 	Ping(ctx context.Context) error
 	Settings(ctx context.Context) (customer.Settings, error)
 	UpdateSettings(ctx context.Context, settings customer.Settings) error
+	UpdatePolicy(ctx context.Context) (updater.Policy, error)
+	SaveUpdatePolicy(ctx context.Context, policy updater.Policy) error
+	AddAuditEvent(ctx context.Context, event store.AuditEvent) error
 	Customer(ctx context.Context, customerID string) (customer.Customer, error)
 	Customers(ctx context.Context, includeDeleted bool) ([]customer.Customer, error)
 	ListCustomers(ctx context.Context, query store.CustomerQuery) ([]customer.Customer, error)
@@ -65,6 +69,7 @@ type Options struct {
 	Greenbone           Greenbone
 	Syncer              Syncer
 	Reports             reportHealth
+	Updater             updater.Manager
 	Logger              *slog.Logger
 	SecureCookies       bool
 	TrustProxyTLSHeader bool
@@ -84,6 +89,7 @@ type Server struct {
 	greenbone           Greenbone
 	syncer              Syncer
 	reports             reportHealth
+	updater             updater.Manager
 	logger              *slog.Logger
 	templates           *template.Template
 	secureCookies       bool
@@ -185,6 +191,7 @@ func New(options Options) (*Server, error) {
 		greenbone:           options.Greenbone,
 		syncer:              options.Syncer,
 		reports:             options.Reports,
+		updater:             options.Updater,
 		logger:              options.Logger,
 		templates:           templates,
 		secureCookies:       options.SecureCookies,
@@ -221,6 +228,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /settings", s.requireAuth(http.HandlerFunc(s.settingsPage)))
 	mux.Handle("POST /settings", s.requireAuth(http.HandlerFunc(s.settingsUpdate)))
 	mux.Handle("POST /settings/test", s.requireAuth(http.HandlerFunc(s.settingsTest)))
+	mux.Handle("GET /updates", s.requireAuth(http.HandlerFunc(s.updatesPage)))
+	mux.Handle("POST /updates/settings", s.requireAuth(http.HandlerFunc(s.updatesSettings)))
+	mux.Handle("POST /updates/check", s.requireAuth(http.HandlerFunc(s.updatesCheck)))
+	mux.Handle("POST /updates/feed", s.requireAuth(http.HandlerFunc(s.updatesFeed)))
+	mux.Handle("POST /updates/stack", s.requireAuth(http.HandlerFunc(s.updatesStack)))
+	mux.Handle("POST /updates/acknowledge", s.requireAuth(http.HandlerFunc(s.updatesAcknowledge)))
 	mux.Handle("POST /sync", s.requireAuth(http.HandlerFunc(s.synchronize)))
 	mux.Handle("POST /sync-selected", s.requireAuth(http.HandlerFunc(s.synchronizeSelected)))
 	mux.Handle("GET /export", s.requireAuth(http.HandlerFunc(s.exportConfiguration)))
@@ -231,6 +244,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/preview", s.requireAuth(http.HandlerFunc(s.apiPreview)))
 	mux.Handle("GET /api/options", s.requireAuth(http.HandlerFunc(s.apiOptions)))
 	mux.Handle("GET /api/operations", s.requireAuth(http.HandlerFunc(s.apiOperations)))
+	mux.Handle("GET /api/updates/status", s.requireAuth(http.HandlerFunc(s.apiUpdatesStatus)))
 	mux.Handle("GET /api/customers/{id}/progress", s.requireAuth(http.HandlerFunc(s.apiCustomerProgress)))
 	mux.Handle("GET /api/customers/{id}/drift", s.requireAuth(http.HandlerFunc(s.apiCustomerDrift)))
 	mux.Handle("POST /customers/{id}/tasks/{kind}/{class}/{sequence}/start", s.requireAuth(http.HandlerFunc(s.startScan)))

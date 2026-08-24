@@ -11,6 +11,7 @@ import (
 	"openvasconf/internal/gmp"
 	"openvasconf/internal/networkplan"
 	"openvasconf/internal/store"
+	"openvasconf/internal/updater"
 )
 
 type pageData struct {
@@ -38,6 +39,9 @@ type pageData struct {
 	Resources        []store.ManagedResource
 	TaskStates       map[string]gmp.TaskStatus
 	Operations       operationsView
+	UpdatePolicy     updater.Policy
+	UpdateStatus     *updater.Status
+	UpdaterError     string
 	Import           *importPreview
 	Reports          []store.ReportSnapshot
 	Report           *store.ReportSnapshot

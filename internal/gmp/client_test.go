@@ -54,6 +54,7 @@ func TestClientCreateTargetEscapesAndJoinsHosts(t *testing.T) {
 		Comment:    `owned <safely>`,
 		Hosts:      []string{"10.0.0.0/24", "10.0.1.0/24"},
 		PortListID: "port-list",
+		AliveTest:  AliveTestConsiderAlive,
 	})
 	if err != nil {
 		t.Fatalf("CreateTarget() error = %v", err)
@@ -69,6 +70,7 @@ func TestClientCreateTargetEscapesAndJoinsHosts(t *testing.T) {
 		"<name>A &amp; B</name>",
 		"<comment>owned &lt;safely&gt;</comment>",
 		"<hosts>10.0.0.0/24,10.0.1.0/24</hosts>",
+		"<alive_tests>Consider Alive</alive_tests>",
 		`<port_list id="port-list"></port_list>`,
 	} {
 		if !strings.Contains(request.XML, expected) {
@@ -91,13 +93,40 @@ func TestClientModifyTargetIncludesExcludeHosts(t *testing.T) {
 		Comment:    "owned",
 		Hosts:      []string{"10.0.0.1"},
 		PortListID: "port-list",
+		AliveTest:  AliveTestConsiderAlive,
 	}); err != nil {
 		t.Fatalf("ModifyTarget() error = %v", err)
 	}
 	request := <-requests
 	if request.Name != "modify_target" ||
-		!strings.Contains(request.XML, `<exclude_hosts></exclude_hosts>`) {
+		!strings.Contains(request.XML, `<exclude_hosts></exclude_hosts>`) ||
+		!strings.Contains(
+			request.XML,
+			`<alive_tests>Consider Alive</alive_tests>`,
+		) {
 		t.Errorf("modify target request = %#v", request)
+	}
+}
+
+func TestClientCreateTargetOmitsAliveTestsByDefault(t *testing.T) {
+	t.Parallel()
+
+	requests := make(chan observedRequest, 1)
+	client := fakeClient(
+		t,
+		[]string{`<create_target_response status="201" status_text="OK" id="target-1"/>`},
+		requests,
+	)
+	if _, err := client.CreateTarget(t.Context(), Target{
+		Name:       "private",
+		Hosts:      []string{"10.0.0.1"},
+		PortListID: "port-list",
+	}); err != nil {
+		t.Fatalf("CreateTarget() error = %v", err)
+	}
+	request := <-requests
+	if strings.Contains(request.XML, "alive_tests") {
+		t.Errorf("create target request unexpectedly overrides alive tests: %q", request.XML)
 	}
 }
 

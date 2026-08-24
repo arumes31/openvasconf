@@ -19,6 +19,7 @@ import (
 	"openvasconf/internal/reconcile"
 	"openvasconf/internal/report"
 	"openvasconf/internal/store"
+	"openvasconf/internal/updater"
 	"openvasconf/internal/web"
 )
 
@@ -79,6 +80,14 @@ func run(logger *slog.Logger) error {
 		cfg.GMPPassword,
 		cfg.ExternalTimeout,
 	)
+	updateClient := updater.NewClient(cfg.UpdaterSocketPath, cfg.ExternalTimeout)
+	updatePolicy, policyErr := repository.UpdatePolicy(ctx)
+	if policyErr != nil {
+		return fmt.Errorf("loading updater policy: %w", policyErr)
+	}
+	if err := updateClient.Configure(ctx, updatePolicy); err != nil {
+		logger.Warn("updater helper unavailable during startup", "error", err)
+	}
 	syncer := reconcile.New(repository, greenbone, logger, cfg.ReconcileEvery)
 	reportSyncer := report.NewSyncer(
 		repository,
@@ -97,6 +106,7 @@ func run(logger *slog.Logger) error {
 		Greenbone:           greenbone,
 		Syncer:              syncer,
 		Reports:             reportSyncer,
+		Updater:             updateClient,
 		Logger:              logger,
 		SecureCookies:       cfg.SecureCookies,
 		TrustProxyTLSHeader: cfg.TrustProxyTLSHeader,

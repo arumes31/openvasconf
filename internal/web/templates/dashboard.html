@@ -11,6 +11,7 @@
   <article class="metric live-metric"><span>GMP latency</span><strong class="compact" data-op-latency>Loading…</strong><small>live response</small></article>
   <article class="metric live-metric"><span>Active scans</span><strong data-op-active>—</strong><small data-op-task>Querying task state</small><small data-op-recent></small></article>
   <article class="metric live-metric"><span>Feed health</span><strong data-op-feeds>—</strong><small data-op-feed-age>Querying feed versions</small></article>
+  <article class="metric live-metric"><span>Update control</span><strong class="compact">{{if and .UpdateStatus .UpdateStatus.Available}}{{if .UpdateStatus.Active}}{{.UpdateStatus.Active.State}}{{else}}READY{{end}}{{else}}OFFLINE{{end}}</strong><small>{{if and .UpdateStatus .UpdateStatus.NextFeedAt}}Feed {{.UpdateStatus.NextFeedAt.Format "Mon 15:04"}}{{else}}Helper unavailable{{end}}</small></article>
 </section>
 {{if or (not .Settings.Scanner.ID) (not .Settings.ScanConfig.ID) (not .Settings.PortList.ID)}}<p class="alert alert-warn"><span>DEFAULTS</span>Required scanner, scan configuration, or port-list defaults are missing. <a href="/settings">Configure Greenbone objects.</a></p>{{end}}
 

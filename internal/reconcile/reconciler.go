@@ -441,6 +441,9 @@ func (r *Reconciler) applyDesired(
 			Hosts:      gmpHostSpecifications(targetPlan.Prefixes),
 			PortListID: value.EffectivePortList(settings).ID,
 		}
+		if targetPlan.Class == networkplan.ClassWAN {
+			target.AliveTest = gmp.AliveTestConsiderAlive
+		}
 		if err := r.releaseTaskForTargetChange(
 			ctx,
 			value.ID,

@@ -171,6 +171,42 @@ func TestReconcilerModifiesTargetWithInclusiveRange(t *testing.T) {
 	}
 }
 
+func TestReconcilerConsidersWANTargetsAlive(t *testing.T) {
+	t.Parallel()
+
+	repository := testRepository(t)
+	configuredSettings(t, repository)
+	createCustomer(t, repository, "alive", []string{"10.0.0.1", "8.8.8.8"})
+	greenbone := newFakeGreenbone()
+	reconciler := New(
+		repository,
+		greenbone,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		time.Minute,
+	)
+
+	if err := reconciler.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(greenbone.targets) != 2 {
+		t.Fatalf("target requests = %d, want 2", len(greenbone.targets))
+	}
+	for _, target := range greenbone.targets {
+		switch {
+		case strings.Contains(target.Name, "_WAN_"):
+			if target.AliveTest != gmp.AliveTestConsiderAlive {
+				t.Errorf("WAN alive test = %q, want %q", target.AliveTest, gmp.AliveTestConsiderAlive)
+			}
+		case strings.Contains(target.Name, "_PrivateIP_"):
+			if target.AliveTest != "" {
+				t.Errorf("private alive test = %q, want scanner default", target.AliveTest)
+			}
+		default:
+			t.Errorf("unexpected target name %q", target.Name)
+		}
+	}
+}
+
 func TestReconcilerRefusesForeignResource(t *testing.T) {
 	t.Parallel()
 

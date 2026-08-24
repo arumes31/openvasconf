@@ -77,8 +77,10 @@ The preview and reconciler use the same deterministic network plan:
 7. RFC1918 space is grouped as `PrivateIP`; public global-unicast space is
    grouped as `WAN`.
 8. Private and WAN entries are never mixed in the same target.
-9. A target can contain multiple prefixes, but never more than 4,095 unique IPs.
-10. Special-use ranges such as loopback, link-local, CGNAT, documentation,
+9. WAN targets use Greenbone's **Consider Hosts as Alive** setting; private
+   targets retain Greenbone's default alive-test behavior.
+10. A target can contain multiple prefixes, but never more than 4,095 unique IPs.
+11. Special-use ranges such as loopback, link-local, CGNAT, documentation,
    multicast, and reserved space are rejected.
 
 Single hosts remain canonical `/32` values in SQLite. They are sent to current
@@ -419,6 +421,7 @@ Duration values use Go syntax such as `30s`, `1m`, or `12h`.
 | `OPENVASCONF_LISTEN` | `127.0.0.1:8080` | HTTP listen address. Compose sets `0.0.0.0:8080` inside the container but publishes it on host loopback. |
 | `OPENVASCONF_DATABASE` | `data/openvasconf.db` | SQLite database path. |
 | `OPENVASCONF_GMP_SOCKET` | `/run/gvmd/gvmd.sock` | `gvmd` Unix socket. |
+| `OPENVASCONF_UPDATER_SOCKET` | `/run/openvasconf-updater/updater.sock` | Private Unix socket for the optional updater helper. |
 | `OPENVASCONF_GMP_USERNAME` | `admin` | GMP username. |
 | `OPENVASCONF_GMP_PASSWORD_FILE` | none | Preferred file containing the GMP password. |
 | `OPENVASCONF_GMP_PASSWORD` | empty | Direct GMP password fallback for development. |
@@ -437,6 +440,8 @@ Duration values use Go syntax such as `30s`, `1m`, or `12h`.
 | `OPENVASCONF_EXPORT_MAX_ROWS` | `100000` | Maximum finding rows in one export. |
 | `OPENVASCONF_EXPORT_MAX_BYTES` | `52428800` | Maximum export response size in bytes. |
 | `OPENVASCONF_PORT` | `8080` | Compose-only host port substitution; it is not read by the Go process. |
+| `OPENVASCONF_UPDATER_IMAGE` | `ghcr.io/arumes31/openvasconf-updater:edge` | Compose-only updater helper image. Prefer an immutable verified digest. |
+| `OPENVASCONF_DOCKER_GID` | `999` | Compose-only supplemental group matching the host Docker socket GID. |
 
 File-based secrets take precedence over direct values. The admin password must
 contain at least 12 characters. All configured durations must be positive, and
@@ -459,6 +464,7 @@ local `.env` file or the shell when needed; keep passwords in the files under
 ```bash
 docker compose -f deploy/greenbone-compose.yaml ps
 docker compose -f deploy/greenbone-compose.yaml logs --tail=200 openvasconf
+docker compose -f deploy/greenbone-compose.yaml logs --tail=200 openvasconf-updater
 docker compose -f deploy/greenbone-compose.yaml logs --tail=200 gvmd
 ```
 
@@ -475,6 +481,39 @@ strip expands to per-component details, check timestamps, and recovery guidance.
 Running tasks expose a confirmation-guarded **Stop scan** action on the customer
 page. After the GMP stop request is sent, the displayed state keeps coming from
 Greenbone polling; the stop is only confirmed once Greenbone reports it.
+
+### Feed and stack updates
+
+The **Updates** workspace monitors helper, image, feed, schedule, and durable
+operation state. Feed refreshes can run daily. Greenbone service upgrades run in
+a configured weekly maintenance window and defer while scans are active.
+
+`openvasconf-updater` is the only component that mounts the Docker socket. The
+web application talks to it over a private Unix socket and can request only fixed
+check, feed-refresh, stack-upgrade, and acknowledgement operations. Requests
+cannot supply commands, Compose paths, services, images, registries, or flags.
+
+Before a stack upgrade, the helper records the running image digests and writes a
+Greenbone PostgreSQL checkpoint to its protected backup volume. It pulls only
+allowlisted Greenbone Community images, recreates only the Greenbone service
+set, and verifies GMP/feed availability. Failed verification restores the prior
+images and database checkpoint, then pauses stack automation until an admin
+reviews and acknowledges the result.
+
+Deployment-only services, including `gvmd-user-init`, `openvasconf`, and the
+updater helper itself, are never recreated by an automated Greenbone upgrade.
+
+Set the Docker socket group before starting the complete deployment:
+
+```bash
+export OPENVASCONF_DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+docker compose -f deploy/greenbone-compose.yaml up -d
+```
+
+The updater uses Greenbone's documented container workflow: pull the dedicated
+feed data images, start those data containers, then wait for the Greenbone
+daemons to finish importing the data. Do not combine this with a separate
+`greenbone-feed-sync` job against the same volumes.
 
 ### Scan reports
 
@@ -597,6 +636,10 @@ checks prevent unsafe deletion, but operator review is still required.
 
 ### Upgrade
 
+Greenbone feed and service upgrades should normally be managed from the
+**Updates** workspace. The manual procedure below remains the break-glass path
+and is also required when the upstream Compose topology itself changes.
+
 1. Back up `openvasconf` and Greenbone data.
 2. Pull the desired repository revision or verified image digest.
 3. Review upstream Greenbone Community Container changes and update the tracked
@@ -690,6 +733,7 @@ node scripts/check-npm-licenses.mjs
 | Path | Purpose |
 |---|---|
 | `cmd/openvasconf` | Process startup and graceful shutdown |
+| `cmd/openvasconf-updater` | Isolated Docker/Compose update helper |
 | `internal/auth` | Single-admin authentication and sessions |
 | `internal/config` | Environment and secret-file configuration |
 | `internal/customer` | Customer, scheduling, and portable document models |
@@ -697,6 +741,7 @@ node scripts/check-npm-licenses.mjs
 | `internal/gmp` | GMP XML client over the `gvmd` Unix socket |
 | `internal/reconcile` | Idempotent desired-state application and cleanup |
 | `internal/store` | SQLite migrations, persistence, history, and ownership mappings |
+| `internal/updater` | Update protocol, scheduler, state machine, Compose allowlist, backup, and rollback |
 | `internal/web` | HTTP routes, security middleware, templates, and static assets |
 | `deploy` | Single-file Greenbone and `openvasconf` test deployment |
 | `.github/workflows` | CI, security, supply-chain, publication, and scheduled checks |
@@ -711,7 +756,8 @@ The repository includes five fail-closed workflows:
   Trivy filesystem/image scans. Reports are retained even when a scanner fails.
 - **Supply chain** verifies module tidiness, enforces Go/npm license allowlists,
   audits workflow syntax/security, and publishes OpenSSF Scorecard results.
-- **Publish container** builds `linux/amd64` and `linux/arm64` GHCR images with
+- **Publish container** builds the application and updater helper for
+  `linux/amd64` and `linux/arm64` with
   an SPDX SBOM, maximum provenance, GitHub artifact attestation, and keyless
   Cosign signature.
 - **Weekly deep scan** runs repeated race tests, Go security scanners, and a
