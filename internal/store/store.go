@@ -139,6 +139,13 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func closeRows(rows interface{ Close() error }, operation string, returnErr error) error {
+	if err := rows.Close(); err != nil {
+		return errors.Join(returnErr, fmt.Errorf("closing %s: %w", operation, err))
+	}
+	return returnErr
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
@@ -177,7 +184,11 @@ func (s *Store) applyMigration(ctx context.Context, version int, statement strin
 	if err != nil {
 		return fmt.Errorf("acquiring migration connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("closing migration connection: %w", err))
+		}
+	}()
 
 	checkForeignKeys := strings.HasPrefix(statement, "-- openvasconf: foreign_keys_off")
 	restoreForeignKeys := false
@@ -236,26 +247,25 @@ func (s *Store) applyMigration(ctx context.Context, version int, statement strin
 			return fmt.Errorf("checking foreign keys after migration: %w", err)
 		}
 		if rows.Next() {
-			defer rows.Close()
 			var table, parent string
 			var rowID, foreignKeyID int64
 			if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
-				return fmt.Errorf("scanning foreign-key violation: %w", err)
+				return closeRows(rows, "foreign-key check", fmt.Errorf("scanning foreign-key violation: %w", err))
 			}
-			return fmt.Errorf(
+			violationErr := fmt.Errorf(
 				"foreign-key violation after migration: table %q row %d references %q (constraint %d)",
 				table,
 				rowID,
 				parent,
 				foreignKeyID,
 			)
+			return closeRows(rows, "foreign-key check", violationErr)
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
-			return fmt.Errorf("checking foreign keys after migration: %w", err)
+			return closeRows(rows, "foreign-key check", fmt.Errorf("checking foreign keys after migration: %w", err))
 		}
-		if err := rows.Close(); err != nil {
-			return fmt.Errorf("closing foreign-key check: %w", err)
+		if err := closeRows(rows, "foreign-key check", nil); err != nil {
+			return err
 		}
 	}
 	if _, err := tx.ExecContext(

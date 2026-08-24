@@ -159,22 +159,23 @@ func (s *Server) customerPreview(
 }
 
 func (s *Server) customerCreate(response http.ResponseWriter, request *http.Request) {
-	var value customer.Customer
-	var form customerForm
-	var err error
-	if token := request.PostForm.Get("preview_token"); token != "" {
-		var envelope previewEnvelope
-		if err := s.verifyPreview(token, &envelope); err != nil {
-			s.renderCustomerError(response, request, form, err)
-			return
-		}
-		value = envelope.Customer
-		form = formFromCustomer(value)
-		form.Editing = false
-	} else {
-		value, _, form, err = s.customerFromForm(request, nil)
+	token := request.PostForm.Get("preview_token")
+	if token == "" {
+		http.Error(response, "preview confirmation is required; review the customer before saving", http.StatusBadRequest)
+		return
 	}
-	if err != nil {
+	var envelope previewEnvelope
+	if err := s.verifyPreview(token, &envelope); err != nil {
+		response.WriteHeader(http.StatusBadRequest)
+		s.renderCustomerError(response, request, customerForm{}, err)
+		return
+	}
+	value := envelope.Customer
+	form := formFromCustomer(value)
+	form.Editing = false
+	if value.ID == "" {
+		err := errors.New("preview confirmation is invalid; review the customer again")
+		response.WriteHeader(http.StatusBadRequest)
 		s.renderCustomerError(response, request, form, err)
 		return
 	}
@@ -196,24 +197,27 @@ func (s *Server) customerUpdate(response http.ResponseWriter, request *http.Requ
 		s.internalError(response, err)
 		return
 	}
-	var value customer.Customer
-	var form customerForm
-	if token := request.PostForm.Get("preview_token"); token != "" {
-		var envelope previewEnvelope
-		if err := s.verifyPreview(token, &envelope); err != nil {
-			s.renderCustomerError(response, request, form, err)
-			return
-		}
-		if envelope.Customer.ID != existing.ID || envelope.Revision != existing.DesiredRevision {
-			s.renderCustomerError(response, request, form, errors.New("customer changed after preview; review the current definition again"))
-			return
-		}
-		value = envelope.Customer
-		form = formFromCustomer(value)
-	} else {
-		value, _, form, err = s.customerFromForm(request, &existing)
+	token := request.PostForm.Get("preview_token")
+	if token == "" {
+		http.Error(response, "preview confirmation is required; review the customer before saving", http.StatusBadRequest)
+		return
 	}
-	if err != nil {
+	var envelope previewEnvelope
+	if err := s.verifyPreview(token, &envelope); err != nil {
+		response.WriteHeader(http.StatusBadRequest)
+		s.renderCustomerError(response, request, customerForm{}, err)
+		return
+	}
+	form := formFromCustomer(envelope.Customer)
+	if envelope.Customer.ID != existing.ID || envelope.Revision != existing.DesiredRevision {
+		response.WriteHeader(http.StatusBadRequest)
+		s.renderCustomerError(response, request, form, errors.New("customer changed after preview; review the current definition again"))
+		return
+	}
+	value := envelope.Customer
+	if value.ID == "" {
+		err := errors.New("preview confirmation is invalid; review the customer again")
+		response.WriteHeader(http.StatusBadRequest)
 		s.renderCustomerError(response, request, form, err)
 		return
 	}

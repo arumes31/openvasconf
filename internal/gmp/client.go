@@ -76,12 +76,16 @@ func (c *Client) streamCall(
 	request any,
 	maxBytes int64,
 	consume func(decoder *xml.Decoder) error,
-) error {
+) (returnErr error) {
 	connection, err := c.dial(ctx, "unix", c.socketPath)
 	if err != nil {
 		return fmt.Errorf("gmp: connecting to unix socket: %w", err)
 	}
-	defer connection.Close()
+	defer func() {
+		if err := connection.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("gmp: closing connection: %w", err))
+		}
+	}()
 
 	deadline := time.Now().Add(c.timeout)
 	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {

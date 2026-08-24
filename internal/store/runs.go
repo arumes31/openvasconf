@@ -172,7 +172,6 @@ func (s *Store) ReconcileRuns(
 	if err != nil {
 		return nil, fmt.Errorf("querying reconcile runs: %w", err)
 	}
-	defer rows.Close()
 	runs := make([]ReconcileRun, 0)
 	for rows.Next() {
 		var run ReconcileRun
@@ -191,26 +190,26 @@ func (s *Store) ReconcileRuns(
 			&run.CompletedOperations,
 			&run.TotalOperations,
 		); err != nil {
-			return nil, fmt.Errorf("scanning reconcile run: %w", err)
+			return nil, closeRows(rows, "reconcile runs query", fmt.Errorf("scanning reconcile run: %w", err))
 		}
 		run.StartedAt, err = parseTime(startedAt)
 		if err != nil {
-			return nil, err
+			return nil, closeRows(rows, "reconcile runs query", err)
 		}
 		if finishedAt.Valid {
 			parsed, parseErr := parseTime(finishedAt.String)
 			if parseErr != nil {
-				return nil, parseErr
+				return nil, closeRows(rows, "reconcile runs query", parseErr)
 			}
 			run.FinishedAt = &parsed
 		}
 		runs = append(runs, run)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating reconcile runs: %w", err)
+		return nil, closeRows(rows, "reconcile runs query", fmt.Errorf("iterating reconcile runs: %w", err))
 	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("closing reconcile runs: %w", err)
+	if err := closeRows(rows, "reconcile runs query", nil); err != nil {
+		return nil, err
 	}
 	for index := range runs {
 		runs[index].Operations, err = s.reconcileOperations(ctx, runs[index].ID)
@@ -234,7 +233,6 @@ func (s *Store) reconcileOperations(
 	if err != nil {
 		return nil, fmt.Errorf("querying reconcile operations: %w", err)
 	}
-	defer rows.Close()
 	operations := make([]ReconcileOperation, 0)
 	for rows.Next() {
 		var operation ReconcileOperation
@@ -252,17 +250,20 @@ func (s *Store) reconcileOperations(
 			&durationMS,
 			&createdAt,
 		); err != nil {
-			return nil, fmt.Errorf("scanning reconcile operation: %w", err)
+			return nil, closeRows(rows, "reconcile operations query", fmt.Errorf("scanning reconcile operation: %w", err))
 		}
 		operation.Duration = time.Duration(durationMS) * time.Millisecond
 		operation.CreatedAt, err = parseTime(createdAt)
 		if err != nil {
-			return nil, err
+			return nil, closeRows(rows, "reconcile operations query", err)
 		}
 		operations = append(operations, operation)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating reconcile operations: %w", err)
+		return nil, closeRows(rows, "reconcile operations query", fmt.Errorf("iterating reconcile operations: %w", err))
+	}
+	if err := closeRows(rows, "reconcile operations query", nil); err != nil {
+		return nil, err
 	}
 	return operations, nil
 }

@@ -91,7 +91,7 @@ func (s *Store) Annotation(
 	ctx context.Context,
 	customerID,
 	fingerprint string,
-) (FindingAnnotation, error) {
+) (result FindingAnnotation, returnErr error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT customer_id, fingerprint, disposition, justification, operator,
 		       remediation_state, remediation_owner,
@@ -105,7 +105,9 @@ func (s *Store) Annotation(
 	if err != nil {
 		return FindingAnnotation{}, fmt.Errorf("querying finding annotation: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = closeRows(rows, "finding annotation query", returnErr)
+	}()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return FindingAnnotation{}, fmt.Errorf("iterating finding annotation: %w", err)
@@ -120,7 +122,7 @@ func (s *Store) Annotation(
 func (s *Store) AnnotationsForCustomer(
 	ctx context.Context,
 	customerID string,
-) (map[string]FindingAnnotation, error) {
+) (result map[string]FindingAnnotation, returnErr error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT customer_id, fingerprint, disposition, justification, operator,
 		       remediation_state, remediation_owner,
@@ -134,9 +136,11 @@ func (s *Store) AnnotationsForCustomer(
 	if err != nil {
 		return nil, fmt.Errorf("querying finding annotations: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = closeRows(rows, "finding annotations query", returnErr)
+	}()
 
-	result := make(map[string]FindingAnnotation)
+	result = make(map[string]FindingAnnotation)
 	for rows.Next() {
 		annotation, err := scanAnnotation(rows)
 		if err != nil {
@@ -190,7 +194,7 @@ func scanAnnotation(rows reportSnapshotScanner) (FindingAnnotation, error) {
 func (s *Store) PreviousImportedSnapshot(
 	ctx context.Context,
 	snapshot ReportSnapshot,
-) (ReportSnapshot, error) {
+) (result ReportSnapshot, returnErr error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT r.id, r.report_id, r.task_id, r.task_name,
 		       COALESCE(r.customer_id, ''), COALESCE(c.name, ''),
@@ -214,7 +218,9 @@ func (s *Store) PreviousImportedSnapshot(
 	if err != nil {
 		return ReportSnapshot{}, fmt.Errorf("querying previous report snapshot: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = closeRows(rows, "previous report snapshot query", returnErr)
+	}()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return ReportSnapshot{}, fmt.Errorf("iterating previous report snapshot: %w", err)
@@ -246,6 +252,9 @@ func (s *Store) FirstSeen(
 			placeholders[index] = "?"
 			arguments = append(arguments, fingerprint)
 		}
+		// The only generated SQL fragments are one "?" placeholder per
+		// fingerprint; all values remain bound parameters.
+		// #nosec G202 -- generated placeholders, never input text.
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT f.fingerprint, MIN(r.scan_end_at)
 			FROM finding_snapshots f
@@ -261,21 +270,20 @@ func (s *Store) FirstSeen(
 		for rows.Next() {
 			var fingerprint, seenAt string
 			if err := rows.Scan(&fingerprint, &seenAt); err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("scanning first-seen time: %w", err)
+				return nil, closeRows(rows, "first-seen query", fmt.Errorf("scanning first-seen time: %w", err))
 			}
 			parsed, err := parseReportTime(seenAt)
 			if err != nil {
-				rows.Close()
-				return nil, err
+				return nil, closeRows(rows, "first-seen query", err)
 			}
 			result[fingerprint] = parsed
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("iterating first-seen times: %w", err)
+			return nil, closeRows(rows, "first-seen query", fmt.Errorf("iterating first-seen times: %w", err))
 		}
-		rows.Close()
+		if err := closeRows(rows, "first-seen query", nil); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }
@@ -314,16 +322,16 @@ func (s *Store) ReportTrend(
 	for rows.Next() {
 		snapshot, err := scanReportSnapshot(rows)
 		if err != nil {
-			rows.Close()
-			return nil, err
+			return nil, closeRows(rows, "report trend query", err)
 		}
 		result = append(result, snapshot)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("iterating report trend: %w", err)
+		return nil, closeRows(rows, "report trend query", fmt.Errorf("iterating report trend: %w", err))
 	}
-	rows.Close()
+	if err := closeRows(rows, "report trend query", nil); err != nil {
+		return nil, err
+	}
 	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
 		result[left], result[right] = result[right], result[left]
 	}

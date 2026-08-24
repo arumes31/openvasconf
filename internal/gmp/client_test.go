@@ -230,7 +230,11 @@ func serveFakeGMP(
 	requests chan<- observedRequest,
 ) {
 	t.Helper()
-	defer connection.Close()
+	defer func() {
+		if err := connection.Close(); err != nil {
+			t.Errorf("fake server close error = %v", err)
+		}
+	}()
 	decoder := xml.NewDecoder(connection)
 	for index := range 2 {
 		var request struct {

@@ -67,6 +67,7 @@ func (s *Server) csrf(next http.Handler) http.Handler {
 			if provided == "" {
 				var err error
 				if strings.HasPrefix(request.Header.Get("Content-Type"), "multipart/form-data") {
+					// #nosec G120 -- MaxBytesReader caps the complete body at 1 MiB above.
 					err = request.ParseMultipartForm(1 << 20)
 				} else {
 					err = request.ParseForm()

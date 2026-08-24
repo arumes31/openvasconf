@@ -52,7 +52,11 @@ func (s *Server) importPreview(response http.ResponseWriter, request *http.Reque
 		s.renderImportError(response, request, errors.New("choose an openvasconf JSON export"))
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			s.logger.Error("import file close failed", "error", err)
+		}
+	}()
 	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
 	decoder.DisallowUnknownFields()
 	var document customer.ExportDocument
