@@ -43,9 +43,13 @@ type Repository interface {
 	ReportFindings(ctx context.Context, snapshotID int64) ([]store.FindingSnapshot, error)
 	PreviousImportedSnapshot(ctx context.Context, snapshot store.ReportSnapshot) (store.ReportSnapshot, error)
 	ReportTrend(ctx context.Context, customerID string, limit int) ([]store.ReportSnapshot, error)
-	FirstSeen(ctx context.Context, customerID string, fingerprints []string) (map[string]time.Time, error)
+	FirstSeenForTask(ctx context.Context, customerID, taskID string, fingerprints []string) (map[string]time.Time, error)
 	UpsertAnnotation(ctx context.Context, annotation store.FindingAnnotation) error
 	AnnotationsForCustomer(ctx context.Context, customerID string) (map[string]store.FindingAnnotation, error)
+	AnnotationsForTask(ctx context.Context, customerID, taskID string) (map[string]store.FindingAnnotation, error)
+	CurrentFindings(ctx context.Context, filter store.FindingQuery) ([]store.CurrentFinding, int, error)
+	CurrentFindingMetrics(ctx context.Context) (store.FindingMetrics, error)
+	UpdateHookwiseSettings(ctx context.Context, settings customer.HookwiseSettings) error
 }
 
 type Authenticator interface {
@@ -63,6 +67,15 @@ type Syncer interface {
 	Trigger()
 }
 
+type hookwiseManager interface {
+	Trigger()
+	Save(ctx context.Context, enabled bool, endpoint, token string) error
+	Test(ctx context.Context) error
+	Retry(ctx context.Context) error
+	Stats(ctx context.Context) (store.HookwiseStats, error)
+	Health(ctx context.Context) (state, detail, guidance, link string)
+}
+
 type Options struct {
 	Repository          Repository
 	Auth                Authenticator
@@ -70,6 +83,7 @@ type Options struct {
 	Syncer              Syncer
 	Reports             reportHealth
 	Updater             updater.Manager
+	Hookwise            hookwiseManager
 	Logger              *slog.Logger
 	SecureCookies       bool
 	TrustProxyTLSHeader bool
@@ -90,6 +104,7 @@ type Server struct {
 	syncer              Syncer
 	reports             reportHealth
 	updater             updater.Manager
+	hookwise            hookwiseManager
 	logger              *slog.Logger
 	templates           *template.Template
 	secureCookies       bool
@@ -114,6 +129,8 @@ func New(options Options) (*Server, error) {
 			return current == candidate
 		},
 		"list": func(values ...string) []string { return values },
+		"add":  func(left, right int) int { return left + right },
+		"sub":  func(left, right int) int { return left - right },
 		"containsInt": func(values []int, candidate int) bool {
 			for _, value := range values {
 				if value == candidate {
@@ -192,6 +209,7 @@ func New(options Options) (*Server, error) {
 		syncer:              options.Syncer,
 		reports:             options.Reports,
 		updater:             options.Updater,
+		hookwise:            options.Hookwise,
 		logger:              options.Logger,
 		templates:           templates,
 		secureCookies:       options.SecureCookies,
@@ -250,11 +268,16 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /customers/{id}/tasks/{kind}/{class}/{sequence}/start", s.requireAuth(http.HandlerFunc(s.startScan)))
 	mux.Handle("POST /customers/{id}/tasks/{kind}/{class}/{sequence}/stop", s.requireAuth(http.HandlerFunc(s.stopScan)))
 	mux.Handle("GET /reports", s.requireAuth(http.HandlerFunc(s.reportsList)))
+	mux.Handle("GET /findings", s.requireAuth(http.HandlerFunc(s.findingsList)))
+	mux.Handle("POST /findings/state", s.requireAuth(http.HandlerFunc(s.findingStateUpdate)))
 	mux.Handle("POST /reports/refresh", s.requireAuth(http.HandlerFunc(s.reportsRefresh)))
 	mux.Handle("GET /reports/compare", s.requireAuth(http.HandlerFunc(s.reportCompare)))
 	mux.Handle("GET /reports/{id}", s.requireAuth(http.HandlerFunc(s.reportDetail)))
 	mux.Handle("GET /reports/{id}/export", s.requireAuth(http.HandlerFunc(s.reportExport)))
 	mux.Handle("POST /reports/{id}/findings/annotate", s.requireAuth(http.HandlerFunc(s.reportAnnotate)))
+	mux.Handle("POST /settings/hookwise", s.requireAuth(http.HandlerFunc(s.hookwiseSettingsUpdate)))
+	mux.Handle("POST /settings/hookwise/test", s.requireAuth(http.HandlerFunc(s.hookwiseSettingsTest)))
+	mux.Handle("POST /settings/hookwise/retry", s.requireAuth(http.HandlerFunc(s.hookwiseRetry)))
 
 	return s.securityHeaders(s.csrf(mux))
 }

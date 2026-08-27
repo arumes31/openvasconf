@@ -176,6 +176,25 @@ func (s *Store) SaveReportSnapshot(
 			return err
 		}
 	}
+	if snapshot.CustomerID != "" && snapshot.TaskID != "" {
+		var newerCount int
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM report_snapshots
+			WHERE customer_id = ? AND task_id = ? AND import_state = ?
+			  AND (scan_end_at > ? OR (scan_end_at = ? AND id > ?))`,
+			snapshot.CustomerID, snapshot.TaskID, ImportStateImported,
+			reportTimeText(snapshot.ScanEnd), reportTimeText(snapshot.ScanEnd), snapshotID,
+		).Scan(&newerCount); err != nil {
+			return fmt.Errorf("checking latest task snapshot: %w", err)
+		}
+		if newerCount == 0 {
+			if err := reconcileFindingStatesTx(ctx, tx, snapshot, snapshotID, findings); err != nil {
+				return err
+			}
+		} else if err := reconcileHistoricalFindingStatesTx(ctx, tx, snapshot, snapshotID, findings); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing report snapshot: %w", err)
 	}

@@ -51,6 +51,13 @@ type pageData struct {
 	Trend            []trendView
 	Compare          *comparisonView
 	ReportFilter     reportFilter
+	CurrentFindings  []store.CurrentFinding
+	FindingMetrics   store.FindingMetrics
+	FindingQuery     store.FindingQuery
+	FindingTotal     int
+	FindingPage      int
+	FindingPages     int
+	HookwiseStats    store.HookwiseStats
 }
 
 type reportFilter struct {
@@ -98,6 +105,7 @@ type comparisonView struct {
 
 type customerForm struct {
 	ID           string
+	CID          string
 	Name         string
 	Description  string
 	Tags         string
@@ -164,6 +172,7 @@ func formFromCustomer(value customer.Customer) customerForm {
 	}
 	return customerForm{
 		ID:           value.ID,
+		CID:          value.CID,
 		Name:         value.Name,
 		Description:  value.Description,
 		Tags:         strings.Join(value.Tags, ", "),

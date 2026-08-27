@@ -16,6 +16,7 @@ import (
 	"openvasconf/internal/auth"
 	"openvasconf/internal/config"
 	"openvasconf/internal/gmp"
+	"openvasconf/internal/hookwise"
 	"openvasconf/internal/reconcile"
 	"openvasconf/internal/report"
 	"openvasconf/internal/store"
@@ -100,6 +101,12 @@ func run(logger *slog.Logger) error {
 			Concurrency: cfg.ReportImportConcurrency,
 		},
 	)
+	ticketManager := hookwise.New(
+		repository,
+		cfg.HookwiseEncryptionKey,
+		cfg.ExternalTimeout,
+		logger,
+	)
 	webServer, err := web.New(web.Options{
 		Repository:          repository,
 		Auth:                authenticator,
@@ -107,6 +114,7 @@ func run(logger *slog.Logger) error {
 		Syncer:              syncer,
 		Reports:             reportSyncer,
 		Updater:             updateClient,
+		Hookwise:            ticketManager,
 		Logger:              logger,
 		SecureCookies:       cfg.SecureCookies,
 		TrustProxyTLSHeader: cfg.TrustProxyTLSHeader,
@@ -128,6 +136,7 @@ func run(logger *slog.Logger) error {
 
 	go syncer.Run(ctx)
 	go reportSyncer.Run(ctx)
+	go ticketManager.Run(ctx)
 	serveErrors := make(chan error, 1)
 	go func() {
 		logger.Info("web server listening", "address", cfg.ListenAddress)

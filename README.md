@@ -176,19 +176,21 @@ New-Item -ItemType Directory -Force secrets | Out-Null
 
 ### 2. Create secrets
 
-Create two single-line files with different strong passwords of at least 12
-characters:
+Create two single-line password files and one independent 32-byte encryption
+key:
 
 | File | Used for |
 |---|---|
 | `secrets/admin_password` | Local `openvasconf` user `admin` |
 | `secrets/gmp_password` | Greenbone/GMP user, `admin` by default |
+| `secrets/hookwise_encryption_key` | AES-256 key for the stored Hookwise bearer token |
 
 Linux/macOS example:
 
 ```bash
 printf '%s' 'replace-with-a-strong-local-password' > secrets/admin_password
 printf '%s' 'replace-with-a-different-gmp-password' > secrets/gmp_password
+openssl rand -base64 32 > secrets/hookwise_encryption_key
 chmod 600 secrets/*
 ```
 
@@ -197,9 +199,12 @@ PowerShell example:
 ```powershell
 Set-Content -NoNewline secrets/admin_password '<strong-local-password>'
 Set-Content -NoNewline secrets/gmp_password '<different-strong-gmp-password>'
+$key = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($key)
+Set-Content -NoNewline secrets/hookwise_encryption_key ([Convert]::ToBase64String($key))
 ```
 
-Do not commit either file. The app password bootstraps the local account only
+Do not commit these files. The app password bootstraps the local account only
 when the database is new; changing the file later does not rotate an existing
 account.
 
@@ -427,6 +432,8 @@ Duration values use Go syntax such as `30s`, `1m`, or `12h`.
 | `OPENVASCONF_GMP_PASSWORD` | empty | Direct GMP password fallback for development. |
 | `OPENVASCONF_ADMIN_PASSWORD_FILE` | none | Preferred local bootstrap-password file. |
 | `OPENVASCONF_ADMIN_PASSWORD` | empty | Direct local bootstrap-password fallback for development. |
+| `OPENVASCONF_HOOKWISE_ENCRYPTION_KEY_FILE` | none | Preferred file containing 32 raw bytes, or base64 for 32 bytes, used to encrypt the Hookwise bearer token. |
+| `OPENVASCONF_HOOKWISE_ENCRYPTION_KEY` | empty | Direct encryption-key fallback for development. |
 | `OPENVASCONF_TIMEZONE` | `Europe/Vienna` | Initial schedule timezone for a new database. |
 | `OPENVASCONF_RECONCILE_INTERVAL` | `1m` | Full drift-reconciliation interval. |
 | `OPENVASCONF_EXTERNAL_TIMEOUT` | `15s` | Maximum idle time for ordinary GMP calls. |
@@ -527,7 +534,7 @@ for failures.
 
 The **Reports** pages show per-scan severity distribution, finding counts, and
 severity trends, and classify findings as new, recurring, or resolved against
-the previous snapshot of the same customer. Any two snapshots of one customer
+the previous snapshot of the same managed task. Any two snapshots of one task
 can be compared explicitly. Each finding can carry an operator annotation —
 false positive or accepted risk with justification and optional expiry, plus
 remediation owner, status, and due date — which survives across later scans.
@@ -535,6 +542,21 @@ Severity-based remediation SLAs (configurable in Greenbone settings) derive due
 dates from a finding's first-seen scan, and expired risk acceptances return to
 active automatically. Filtered findings can be exported as CSV, JSON, PDF, or
 SARIF; SARIF uses the stable finding fingerprints as result identity.
+
+The **Findings** page is the operational current-exposure view. It selects the
+latest successful snapshot of every managed task and shows one row per exact
+task-scoped fingerprint. Marking a row resolved or wont-fix suppresses it from
+current and future views until it is manually reopened; historical snapshots
+remain immutable.
+
+Hookwise ticket synchronization is configured in **Greenbone settings**. Add a
+CID to each customer, then configure the global webhook endpoint and bearer
+token. Findings with severity 7.0 or higher open tickets. Tickets close after a
+successful task snapshot no longer contains the finding, its severity falls
+below 7.0, or an operator marks it resolved/wont-fix. Configure the Hookwise
+endpoint with trigger field `$.state`, open value `open`, close value `closed`,
+and JSON mapping `"customer_id": "$.cid"`. Delivery uses a durable retrying
+outbox; missing CIDs are shown as routing blocks instead of being discarded.
 
 Authenticated JSON endpoints used by the web UI are:
 

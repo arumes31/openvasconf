@@ -349,12 +349,14 @@ services:
       OPENVASCONF_GMP_PASSWORD_FILE: "/run/secrets/openvasconf_gmp_password"
       OPENVASCONF_UPDATER_SOCKET: "/run/openvasconf-updater/updater.sock"
       OPENVASCONF_ADMIN_PASSWORD_FILE: "/run/secrets/openvasconf_admin_password"
+      OPENVASCONF_HOOKWISE_ENCRYPTION_KEY_FILE: "/run/secrets/openvasconf_hookwise_encryption_key"
       OPENVASCONF_TIMEZONE: "${OPENVASCONF_TIMEZONE:-Europe/Vienna}"
       OPENVASCONF_REPORT_FETCH_TIMEOUT: "${OPENVASCONF_REPORT_FETCH_TIMEOUT:-5m}"
       OPENVASCONF_SECURE_COOKIES: "${OPENVASCONF_SECURE_COOKIES:-false}"
     secrets:
       - openvasconf_admin_password
       - openvasconf_gmp_password
+      - openvasconf_hookwise_encryption_key
     volumes:
       - openvasconf_data:/data
       - gvmd_socket_vol:/run/gvmd
@@ -417,6 +419,8 @@ secrets:
     file: ../secrets/admin_password
   openvasconf_gmp_password:
     file: ../secrets/gmp_password
+  openvasconf_hookwise_encryption_key:
+    file: ../secrets/hookwise_encryption_key
 
 volumes:
   gpg_data_vol:

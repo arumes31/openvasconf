@@ -403,6 +403,17 @@ legend { color: var(--paper-dim); font-size: 8px; letter-spacing: .1em; text-tra
 .annotate-form { display: grid; grid-template-columns: repeat(2, minmax(130px, 1fr)); gap: 7px; min-width: min(520px, 75vw); padding: 9px 0; }
 .annotate-form label { margin: 0; }
 .annotate-form button { justify-self: start; }
+.finding-overview { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.findings-table { min-width: 1350px; }
+.findings-table td:nth-child(2) { max-width: 370px; }
+.findings-table td code { display: block; max-width: 300px; color: var(--paper-faint); font-size: 8px; }
+.finding-state-form { display: grid; gap: 7px; min-width: 260px; padding-top: 8px; }
+.finding-state-form label { margin: 0; }
+.pagination-row { justify-content: flex-end; margin-top: 10px; }
+.hookwise-panel { margin-top: 12px; }
+.hookwise-grid { grid-template-columns: .7fr 1.7fr 1.2fr .8fr; align-items: start; }
+.hookwise-metric { min-height: 82px; }
+.hookwise-actions { margin-top: 10px; }
 .export-bar { display: flex; gap: 7px; align-items: end; }
 .export-bar label { margin: 0; }
 
