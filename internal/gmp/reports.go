@@ -247,9 +247,10 @@ type resultWire struct {
 	Port     string `xml:"port"`
 	Location string `xml:"location"`
 	NVT      struct {
-		OID  string `xml:"oid,attr"`
-		Name string `xml:"name"`
-		Tags string `xml:"tags"`
+		OID        string         `xml:"oid,attr"`
+		Name       string         `xml:"name"`
+		Tags       string         `xml:"tags"`
+		References []nvtReference `xml:"refs>ref"`
 	} `xml:"nvt"`
 	Threat      string `xml:"threat"`
 	Severity    string `xml:"severity"`
@@ -258,6 +259,11 @@ type resultWire struct {
 	Solution    struct {
 		Text string `xml:",chardata"`
 	} `xml:"solution"`
+}
+
+type nvtReference struct {
+	Type string `xml:"type,attr"`
+	ID   string `xml:"id,attr"`
 }
 
 func (wire resultWire) normalize() ReportResult {
@@ -274,7 +280,7 @@ func (wire resultWire) normalize() ReportResult {
 		QOD:         parseInteger(wire.QOD),
 		Remediation: remediation(wire),
 	}
-	result.CVEs = cveReferences(wire.NVT.Tags)
+	result.CVEs = cveReferences(wire.NVT.Tags, wire.NVT.References)
 	return result
 }
 
@@ -295,17 +301,33 @@ func remediation(wire resultWire) string {
 	return value
 }
 
-// cveReferences extracts the comma-separated CVE list from the NVT tags.
-func cveReferences(tags string) []string {
+// cveReferences merges legacy NVT tag values with current GMP reference IDs.
+func cveReferences(tags string, references []nvtReference) []string {
 	value := parseNVtTags(tags)["cve"]
-	if value == "" {
-		return nil
-	}
 	result := make([]string, 0)
-	for _, entry := range strings.Split(value, ",") {
-		if trimmed := strings.TrimSpace(entry); trimmed != "" {
-			result = append(result, trimmed)
+	seen := make(map[string]struct{})
+	appendCVE := func(value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return
 		}
+		key := strings.ToUpper(trimmed)
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		result = append(result, trimmed)
+	}
+	for _, entry := range strings.Split(value, ",") {
+		appendCVE(entry)
+	}
+	for _, reference := range references {
+		if strings.EqualFold(strings.TrimSpace(reference.Type), "cve") {
+			appendCVE(reference.ID)
+		}
+	}
+	if len(result) == 0 {
+		return nil
 	}
 	return result
 }

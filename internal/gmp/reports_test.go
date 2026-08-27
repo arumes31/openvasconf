@@ -32,6 +32,8 @@ const testReportXML = `<get_reports_response status="200" status_text="OK">` +
 	`<tags>cvss_base_vector=AV:N/AC:L/Au:N/C:P/I:P/A:P|` +
 	`solution=Update OpenSSH to the latest available version|` +
 	`cve=CVE-2021-1234, CVE-2021-5678|summary=weak ciphers</tags>` +
+	`<refs><ref type="cve" id="CVE-2021-5678"/>` +
+	`<ref type="cve" id="CVE-2024-9999"/><ref type="url" id="https://example.invalid"/></refs>` +
 	`</nvt>` +
 	`<threat>High</threat>` +
 	`<severity>9.8</severity>` +
@@ -89,7 +91,8 @@ func TestClientReportParsesStreamedResults(t *testing.T) {
 		first.Port != "22/tcp" || first.Threat != "High" || first.Severity != 9.8 || first.QOD != 80 {
 		t.Errorf("first result = %#v", first)
 	}
-	if len(first.CVEs) != 2 || first.CVEs[0] != "CVE-2021-1234" || first.CVEs[1] != "CVE-2021-5678" {
+	if len(first.CVEs) != 3 || first.CVEs[0] != "CVE-2021-1234" ||
+		first.CVEs[1] != "CVE-2021-5678" || first.CVEs[2] != "CVE-2024-9999" {
 		t.Errorf("cves = %#v", first.CVEs)
 	}
 	if first.Remediation != "Update OpenSSH to the latest available version" {
