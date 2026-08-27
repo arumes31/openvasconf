@@ -109,8 +109,8 @@ func TestClientReportUsesReportSpecificTimeout(t *testing.T) {
 	dial := func(context.Context, string, string) (net.Conn, error) {
 		return clientSide, nil
 	}
-	client := NewWithDialer("admin", "secret", 20*time.Millisecond, dial).
-		WithReportTimeout(200 * time.Millisecond)
+	client := NewWithDialer("admin", "secret", 100*time.Millisecond, dial).
+		WithReportTimeout(2 * time.Second)
 
 	go func() {
 		defer func() { _ = serverSide.Close() }()
@@ -126,13 +126,48 @@ func TestClientReportUsesReportSpecificTimeout(t *testing.T) {
 				))
 				continue
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(250 * time.Millisecond)
 			_, _ = serverSide.Write([]byte(testReportXML))
 		}
 	}()
 
 	if _, err := client.Report(t.Context(), "report-1", reportLimits()); err != nil {
 		t.Fatalf("Report() error = %v, want report-specific timeout to allow response", err)
+	}
+}
+
+func TestClientReportReturnsBeforeServerClosesConnection(t *testing.T) {
+	t.Parallel()
+
+	clientSide, serverSide := net.Pipe()
+	dial := func(context.Context, string, string) (net.Conn, error) {
+		return clientSide, nil
+	}
+	client := NewWithDialer("admin", "secret", 50*time.Millisecond, dial)
+	release := make(chan struct{})
+	go func() {
+		defer func() { _ = serverSide.Close() }()
+		decoder := xml.NewDecoder(serverSide)
+		for requestIndex := range 2 {
+			var request struct{ XMLName xml.Name }
+			if err := decoder.Decode(&request); err != nil {
+				return
+			}
+			if requestIndex == 0 {
+				_, _ = serverSide.Write([]byte(
+					`<authenticate_response status="200" status_text="OK"/>`,
+				))
+				continue
+			}
+			_, _ = serverSide.Write([]byte(testReportXML))
+			<-release
+		}
+	}()
+
+	_, err := client.Report(t.Context(), "report-1", reportLimits())
+	close(release)
+	if err != nil {
+		t.Fatalf("Report() error = %v, want completion at closing response element", err)
 	}
 }
 

@@ -180,6 +180,9 @@ func (p *reportParser) consume(decoder *xml.Decoder) error {
 			if len(p.stack) > 0 {
 				p.stack = p.stack[:len(p.stack)-1]
 			}
+			if element.Name.Local == "get_reports_response" {
+				return nil
+			}
 		case xml.CharData:
 			p.captureText(string(element))
 		}
