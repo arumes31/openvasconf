@@ -279,6 +279,21 @@ func (s *Store) ResetFailedReportImports(ctx context.Context) error {
 	return nil
 }
 
+// DeleteFailedReportImport removes a failed placeholder when Greenbone no
+// longer has the referenced report. Successfully imported snapshots are
+// immutable and cannot be removed through this recovery path.
+func (s *Store) DeleteFailedReportImport(ctx context.Context, reportID string) error {
+	if _, err := s.db.ExecContext(ctx, `
+		DELETE FROM report_snapshots
+		WHERE report_id = ? AND import_state = ?`,
+		reportID,
+		ImportStateFailed,
+	); err != nil {
+		return fmt.Errorf("deleting failed report import: %w", err)
+	}
+	return nil
+}
+
 // ListReportSnapshots returns snapshots newest first, joined with the
 // customer name. An empty customerID lists snapshots of every customer.
 func (s *Store) ListReportSnapshots(

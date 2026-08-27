@@ -32,6 +32,19 @@ type fakeReportStore struct {
 	failures      []recordedFailure
 	taskCustomers map[string]string
 	resetCount    int
+	deleted       []string
+}
+
+func (f *fakeReportStore) DeleteFailedReportImport(_ context.Context, reportID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.states[reportID] == store.ImportStateFailed {
+		delete(f.states, reportID)
+		delete(f.attempts, reportID)
+		delete(f.customers, reportID)
+		f.deleted = append(f.deleted, reportID)
+	}
+	return nil
 }
 
 func (f *fakeReportStore) ResetFailedReportImports(context.Context) error {
@@ -374,6 +387,64 @@ func TestSyncerManualTriggerRetriesExhaustedReports(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("manual trigger did not requeue and import the exhausted report")
+}
+
+func TestSyncerRemovesMissingFailedRetry(t *testing.T) {
+	t.Parallel()
+
+	repository := newFakeReportStore()
+	repository.states["report-stale"] = store.ImportStateFailed
+	repository.attempts["report-stale"] = 1
+	repository.customers["report-stale"] = "customer-1"
+	greenbone := &fakeReportGMP{
+		reportErr: map[string]error{
+			"report-stale": &gmp.ProtocolError{
+				Command:    "get_reports",
+				Status:     "404",
+				StatusText: "Failed to find report",
+			},
+		},
+	}
+	syncer := newTestSyncer(repository, greenbone)
+
+	if err := syncer.SyncOnce(t.Context()); err != nil {
+		t.Fatalf("SyncOnce() error = %v", err)
+	}
+	if len(repository.deleted) != 1 || repository.deleted[0] != "report-stale" {
+		t.Fatalf("deleted reports = %#v, want report-stale", repository.deleted)
+	}
+	if _, err := repository.ReportImportState(t.Context(), "report-stale"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ReportImportState() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSyncerKeepsMissingCurrentReportVisible(t *testing.T) {
+	t.Parallel()
+
+	repository := newFakeReportStore()
+	repository.taskCustomers["task-1"] = "customer-1"
+	greenbone := &fakeReportGMP{
+		tasks: []gmp.TaskStatus{taskWithReport("task-1", "report-current", "Done")},
+		reportErr: map[string]error{
+			"report-current": &gmp.ProtocolError{
+				Command:    "get_reports",
+				Status:     "404",
+				StatusText: "Failed to find report",
+			},
+		},
+	}
+	syncer := newTestSyncer(repository, greenbone)
+
+	if err := syncer.SyncOnce(t.Context()); err == nil {
+		t.Fatal("SyncOnce() error = nil, want current missing report failure")
+	}
+	if len(repository.deleted) != 0 {
+		t.Fatalf("deleted reports = %#v, want none", repository.deleted)
+	}
+	state, err := repository.ReportImportState(t.Context(), "report-current")
+	if err != nil || state != store.ImportStateFailed {
+		t.Fatalf("ReportImportState() = %q, %v, want failed", state, err)
+	}
 }
 
 func TestSyncerAuthFailureAbortsCycle(t *testing.T) {

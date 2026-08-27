@@ -300,6 +300,36 @@ func TestResetFailedReportImportsRequeuesOnlyFailures(t *testing.T) {
 	}
 }
 
+func TestDeleteFailedReportImportPreservesImportedSnapshots(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	repository := openTestStore(t)
+	if err := repository.RecordReportImportFailure(
+		ctx, "report-failed", "task-1", "task", "", "missing",
+	); err != nil {
+		t.Fatalf("RecordReportImportFailure() error = %v", err)
+	}
+	if err := repository.SaveReportSnapshot(ctx, testSnapshot(""), testFindings()); err != nil {
+		t.Fatalf("SaveReportSnapshot() error = %v", err)
+	}
+
+	if err := repository.DeleteFailedReportImport(ctx, "report-failed"); err != nil {
+		t.Fatalf("DeleteFailedReportImport(failed) error = %v", err)
+	}
+	if _, err := repository.ReportImportState(ctx, "report-failed"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("failed report state error = %v, want ErrNotFound", err)
+	}
+
+	if err := repository.DeleteFailedReportImport(ctx, "report-uuid-1"); err != nil {
+		t.Fatalf("DeleteFailedReportImport(imported) error = %v", err)
+	}
+	state, err := repository.ReportImportState(ctx, "report-uuid-1")
+	if err != nil || state != ImportStateImported {
+		t.Fatalf("imported report state = %q, %v", state, err)
+	}
+}
+
 func TestCustomerForManagedTask(t *testing.T) {
 	t.Parallel()
 
