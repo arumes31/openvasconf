@@ -39,6 +39,7 @@ type Store interface {
 		ctx context.Context,
 		reportID, taskID, taskName, customerID, diagnostic string,
 	) error
+	ResetFailedReportImports(ctx context.Context) error
 	PendingReportRetries(ctx context.Context, maxAttempts int) ([]store.ReportSnapshot, error)
 	CustomerForManagedTask(ctx context.Context, gvmTaskID string) (string, error)
 	ReportImportStats(ctx context.Context) (store.ReportImportStats, error)
@@ -106,8 +107,9 @@ func NewSyncer(
 	}
 }
 
-// Trigger requests an out-of-band synchronization cycle, for example from the
-// operator UI. It never blocks.
+// Trigger requests an out-of-band synchronization cycle and rearms failed
+// imports, for example when the operator selects Refresh reports. It never
+// blocks.
 func (s *Syncer) Trigger() {
 	select {
 	case s.trigger <- struct{}{}:
@@ -121,37 +123,59 @@ func (s *Syncer) Run(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
-	s.runAndLog(ctx)
+	s.runAndLog(ctx, false)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runAndLog(ctx)
+			s.runAndLog(ctx, false)
 		case <-s.trigger:
-			s.runAndLog(ctx)
+			s.runAndLog(ctx, true)
 		}
 	}
 }
 
-func (s *Syncer) runAndLog(ctx context.Context) {
-	if err := s.SyncOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+func (s *Syncer) runAndLog(ctx context.Context, retryExhausted bool) {
+	if err := s.syncOnce(ctx, retryExhausted); err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Error("report synchronization failed", "error", err)
 	}
 }
 
 // SyncOnce executes one discovery and import cycle.
 func (s *Syncer) SyncOnce(ctx context.Context) error {
+	return s.syncOnce(ctx, false)
+}
+
+func (s *Syncer) syncOnce(ctx context.Context, retryExhausted bool) error {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 
-	err := s.syncLocked(ctx)
+	var err error
+	if retryExhausted {
+		err = s.store.ResetFailedReportImports(ctx)
+		if err != nil {
+			err = fmt.Errorf("report: resetting failed imports: %w", err)
+		} else {
+			s.clearAllRetries()
+		}
+	}
+	if err == nil {
+		err = s.syncLocked(ctx)
+	}
 	s.healthMu.Lock()
 	s.cycleRan = true
 	s.lastCycle = time.Now()
 	s.lastErr = err
 	s.healthMu.Unlock()
 	return err
+}
+
+func (s *Syncer) clearAllRetries() {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	clear(s.nextRetry)
+	clear(s.failures)
 }
 
 func (s *Syncer) syncLocked(ctx context.Context) error {
@@ -418,7 +442,7 @@ func (s *Syncer) ReportHealth(
 	if stats.FailedCount > 0 {
 		return "degraded",
 			fmt.Sprintf("%d report import(s) failed", stats.FailedCount),
-			"Open the reports list and inspect the failed imports.",
+			"Inspect the failed imports, then use Refresh reports to retry them.",
 			healthLink
 	}
 	detail = "reports up to date"

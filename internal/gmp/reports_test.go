@@ -1,9 +1,13 @@
 package gmp
 
 import (
+	"context"
+	"encoding/xml"
 	"errors"
+	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testReportXML = `<get_reports_response status="200" status_text="OK">` +
@@ -95,6 +99,40 @@ func TestClientReportParsesStreamedResults(t *testing.T) {
 	second := report.Results[1]
 	if second.Remediation != "No solution available" {
 		t.Errorf("solution element fallback = %q", second.Remediation)
+	}
+}
+
+func TestClientReportUsesReportSpecificTimeout(t *testing.T) {
+	t.Parallel()
+
+	clientSide, serverSide := net.Pipe()
+	dial := func(context.Context, string, string) (net.Conn, error) {
+		return clientSide, nil
+	}
+	client := NewWithDialer("admin", "secret", 20*time.Millisecond, dial).
+		WithReportTimeout(200 * time.Millisecond)
+
+	go func() {
+		defer func() { _ = serverSide.Close() }()
+		decoder := xml.NewDecoder(serverSide)
+		for requestIndex := range 2 {
+			var request struct{ XMLName xml.Name }
+			if err := decoder.Decode(&request); err != nil {
+				return
+			}
+			if requestIndex == 0 {
+				_, _ = serverSide.Write([]byte(
+					`<authenticate_response status="200" status_text="OK"/>`,
+				))
+				continue
+			}
+			time.Sleep(50 * time.Millisecond)
+			_, _ = serverSide.Write([]byte(testReportXML))
+		}
+	}()
+
+	if _, err := client.Report(t.Context(), "report-1", reportLimits()); err != nil {
+		t.Fatalf("Report() error = %v, want report-specific timeout to allow response", err)
 	}
 }
 

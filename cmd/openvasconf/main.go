@@ -79,7 +79,7 @@ func run(logger *slog.Logger) error {
 		cfg.GMPUsername,
 		cfg.GMPPassword,
 		cfg.ExternalTimeout,
-	)
+	).WithReportTimeout(cfg.ReportFetchTimeout)
 	updateClient := updater.NewClient(cfg.UpdaterSocketPath, cfg.ExternalTimeout)
 	updatePolicy, policyErr := repository.UpdatePolicy(ctx)
 	if policyErr != nil {

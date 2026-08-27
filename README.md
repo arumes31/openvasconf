@@ -429,11 +429,12 @@ Duration values use Go syntax such as `30s`, `1m`, or `12h`.
 | `OPENVASCONF_ADMIN_PASSWORD` | empty | Direct local bootstrap-password fallback for development. |
 | `OPENVASCONF_TIMEZONE` | `Europe/Vienna` | Initial schedule timezone for a new database. |
 | `OPENVASCONF_RECONCILE_INTERVAL` | `1m` | Full drift-reconciliation interval. |
-| `OPENVASCONF_EXTERNAL_TIMEOUT` | `15s` | Deadline for each GMP call. |
+| `OPENVASCONF_EXTERNAL_TIMEOUT` | `15s` | Maximum idle time for ordinary GMP calls. |
 | `OPENVASCONF_SESSION_LIFETIME` | `12h` | Local admin session lifetime. |
 | `OPENVASCONF_SECURE_COOKIES` | `false` | Always mark session and CSRF cookies `Secure`. |
 | `OPENVASCONF_TRUST_PROXY_TLS` | `false` | Trust `X-Forwarded-Proto: https` when deciding whether cookies are secure. |
 | `OPENVASCONF_REPORT_SYNC_INTERVAL` | `2m` | Completed-report discovery and import interval. |
+| `OPENVASCONF_REPORT_FETCH_TIMEOUT` | `5m` | Maximum idle time while fetching a report from GMP. |
 | `OPENVASCONF_REPORT_MAX_XML_BYTES` | `67108864` | Maximum accepted report XML size in bytes. |
 | `OPENVASCONF_REPORT_MAX_FINDINGS` | `50000` | Maximum findings imported from one report. |
 | `OPENVASCONF_REPORT_IMPORT_CONCURRENCY` | `1` | Concurrent report imports. |

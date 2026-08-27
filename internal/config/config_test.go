@@ -5,7 +5,22 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestLoadReportFetchTimeout(t *testing.T) {
+	t.Setenv(adminSecretValueEnv, "admin-test-password")
+	t.Setenv("OPENVASCONF_ADMIN_PASSWORD_FILE", "")
+	t.Setenv("OPENVASCONF_REPORT_FETCH_TIMEOUT", "7m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ReportFetchTimeout != 7*time.Minute {
+		t.Errorf("ReportFetchTimeout = %v, want 7m", cfg.ReportFetchTimeout)
+	}
+}
 
 func TestNativeInteger(t *testing.T) {
 	t.Setenv("OPENVASCONF_TEST_INTEGER", " 42 ")

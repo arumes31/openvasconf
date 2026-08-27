@@ -24,6 +24,7 @@ services:
       OPENVASCONF_GMP_PASSWORD_FILE: "/run/secrets/openvasconf_gmp_password"
       OPENVASCONF_ADMIN_PASSWORD_FILE: "/run/secrets/openvasconf_admin_password"
       OPENVASCONF_TIMEZONE: "${OPENVASCONF_TIMEZONE:-Europe/Vienna}"
+      OPENVASCONF_REPORT_FETCH_TIMEOUT: "${OPENVASCONF_REPORT_FETCH_TIMEOUT:-5m}"
     secrets:
       - openvasconf_admin_password
       - openvasconf_gmp_password
