@@ -33,6 +33,7 @@ type fakeReportStore struct {
 	taskCustomers map[string]string
 	resetCount    int
 	deleted       []string
+	scanAlerts    []store.ScanAlert
 }
 
 func (f *fakeReportStore) DeleteFailedReportImport(_ context.Context, reportID string) error {
@@ -161,6 +162,21 @@ func (f *fakeReportStore) ReportImportStats(context.Context) (store.ReportImport
 	return stats, nil
 }
 
+func (f *fakeReportStore) RecordScanFailure(
+	_ context.Context,
+	alert store.ScanAlert,
+) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, existing := range f.scanAlerts {
+		if existing.CustomerID == alert.CustomerID && existing.ReportID == alert.ReportID {
+			return false, nil
+		}
+	}
+	f.scanAlerts = append(f.scanAlerts, alert)
+	return true, nil
+}
+
 type fakeReportGMP struct {
 	mu        sync.Mutex
 	tasks     []gmp.TaskStatus
@@ -271,6 +287,41 @@ func TestSyncerDiscoversAndImports(t *testing.T) {
 	}
 	if greenbone.fetchedCount() != 1 {
 		t.Errorf("fetched = %d, want exactly one new report", greenbone.fetchedCount())
+	}
+}
+
+func TestSyncerRecordsFailedManagedScanOnce(t *testing.T) {
+	t.Parallel()
+	repository := newFakeReportStore()
+	repository.taskCustomers["gvm-task-failed"] = "customer-1"
+	greenbone := &fakeReportGMP{
+		tasks: []gmp.TaskStatus{{
+			ID: "gvm-task-failed", Name: "customer_PrivateIP_Task1",
+			LastReport: &gmp.ReportStatus{
+				ID: "report-interrupted", Status: "Interrupted", ScanEnd: time.Now(),
+			},
+		}},
+		reports: map[string]gmp.ReportDetails{
+			"report-interrupted": {
+				ID: "report-interrupted", TaskID: "gvm-task-failed",
+				TaskName: "customer_PrivateIP_Task1", Status: "Interrupted",
+				ScanEnd: time.Now(),
+			},
+		},
+	}
+	syncer := newTestSyncer(repository, greenbone)
+	if err := syncer.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncer.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.scanAlerts) != 1 {
+		t.Fatalf("scan alerts = %#v", repository.scanAlerts)
+	}
+	alert := repository.scanAlerts[0]
+	if alert.ReportID != "report-interrupted" || alert.Status != "Interrupted" {
+		t.Fatalf("scan alert = %#v", alert)
 	}
 }
 

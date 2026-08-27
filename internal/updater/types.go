@@ -116,17 +116,18 @@ type Feed struct {
 }
 
 type Operation struct {
-	ID           string     `json:"id"`
-	Kind         Kind       `json:"kind"`
-	Trigger      Trigger    `json:"trigger"`
-	State        State      `json:"state"`
-	Phase        string     `json:"phase"`
-	Detail       string     `json:"detail,omitempty"`
-	StartedAt    time.Time  `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
-	Backup       string     `json:"-"`
-	ImagesBefore []Image    `json:"images_before,omitempty"`
-	ImagesAfter  []Image    `json:"images_after,omitempty"`
+	ID             string     `json:"id"`
+	Kind           Kind       `json:"kind"`
+	Trigger        Trigger    `json:"trigger"`
+	State          State      `json:"state"`
+	Phase          string     `json:"phase"`
+	Detail         string     `json:"detail,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	PhaseStartedAt time.Time  `json:"phase_started_at"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	Backup         string     `json:"-"`
+	ImagesBefore   []Image    `json:"images_before,omitempty"`
+	ImagesAfter    []Image    `json:"images_after,omitempty"`
 }
 
 func (o Operation) Terminal() bool {

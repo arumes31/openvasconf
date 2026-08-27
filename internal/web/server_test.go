@@ -341,10 +341,17 @@ func TestJSONPreviewAndSettingsOverride(t *testing.T) {
 }
 
 func TestUpdaterPagePolicyAndStackTrigger(t *testing.T) {
+	phaseStartedAt := time.Date(2026, 8, 27, 10, 15, 0, 0, time.UTC)
 	manager := &fakeUpdateManager{status: updater.Status{
 		ProtocolVersion: updater.ProtocolVersion,
 		Available:       true,
 		Policy:          updater.DefaultPolicy("Europe/Vienna"),
+		Active: &updater.Operation{
+			ID: "operation-active", Kind: updater.KindFeed,
+			State: updater.StateRunning, Phase: "importing",
+			Detail:    "Waiting for Greenbone feed import.",
+			StartedAt: phaseStartedAt.Add(-time.Minute), PhaseStartedAt: phaseStartedAt,
+		},
 	}}
 	app := newTestWebAppWithUpdater(t, manager)
 	login(t, app)
@@ -356,6 +363,11 @@ func TestUpdaterPagePolicyAndStackTrigger(t *testing.T) {
 	body := readBody(t, response)
 	if response.StatusCode != http.StatusOK || !strings.Contains(body, "Greenbone updates") {
 		t.Fatalf("updates page = %d: %s", response.StatusCode, body)
+	}
+	if !strings.Contains(body, "data-update-phase-start=") ||
+		!strings.Contains(body, "LATEST PROGRESS") ||
+		!strings.Contains(body, "data-update-elapsed") {
+		t.Fatalf("updates page lacks phase progress markup: %s", body)
 	}
 
 	policyForm := url.Values{
@@ -393,6 +405,26 @@ func TestUpdaterPagePolicyAndStackTrigger(t *testing.T) {
 	}
 	if len(events) < 2 || events[0].ResourceKind != "updater" {
 		t.Fatalf("audit events = %#v", events)
+	}
+}
+
+func TestUpdaterJavaScriptUsesAdaptivePolling(t *testing.T) {
+	t.Parallel()
+	contents, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	for _, expected := range []string{
+		"const activeDelay = 2000",
+		"const warmIdleDelay = 10000",
+		"const coldIdleDelay = 30000",
+		"visibilitychange",
+		"data-update-phase-start",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Errorf("app.js does not contain %q", expected)
+		}
 	}
 }
 

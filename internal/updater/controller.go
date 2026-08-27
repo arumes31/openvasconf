@@ -247,9 +247,11 @@ func (c *Controller) Trigger(
 		c.mu.Unlock()
 		return Operation{}, err
 	}
+	startedAt := c.now().UTC()
 	operation := Operation{
 		ID: operationID, Kind: kind, Trigger: request.Trigger,
-		State: StateQueued, Phase: "queued", StartedAt: c.now().UTC(),
+		State: StateQueued, Phase: "queued", StartedAt: startedAt,
+		PhaseStartedAt: startedAt,
 	}
 	c.state.Active = cloneOperation(&operation)
 	c.state.BackupPath = ""
@@ -591,6 +593,9 @@ func (c *Controller) recoverInterrupted(operation Operation) {
 func (c *Controller) phase(operationID string, state State, phase, detail string) {
 	c.mu.Lock()
 	if c.state.Active != nil && c.state.Active.ID == operationID {
+		if c.state.Active.Phase != phase || c.state.Active.PhaseStartedAt.IsZero() {
+			c.state.Active.PhaseStartedAt = c.now().UTC()
+		}
 		c.state.Active.State = state
 		c.state.Active.Phase = phase
 		c.state.Active.Detail = truncate(detail, 500)

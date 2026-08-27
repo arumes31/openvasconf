@@ -1,29 +1,20 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"openvasconf/internal/store"
 )
 
 func (s *Server) findingsList(response http.ResponseWriter, request *http.Request) {
 	query := request.URL.Query()
-	page, _ := strconv.Atoi(query.Get("page"))
-	filter := store.FindingQuery{
-		CustomerID: query.Get("customer"),
-		CID:        strings.TrimSpace(query.Get("cid")),
-		Task:       strings.TrimSpace(query.Get("task")),
-		Severity:   query.Get("severity"),
-		Host:       strings.TrimSpace(query.Get("host")),
-		Scope:      query.Get("scope"),
-		Ticket:     query.Get("ticket"),
-		Lifecycle:  query.Get("lifecycle"),
-		Page:       max(page, 1),
-		PageSize:   100,
-	}
+	filter := findingFilterFromRequest(request, 100)
 	rows, total, err := s.repository.CurrentFindings(request.Context(), filter)
 	if err != nil {
 		s.internalError(response, err)
@@ -52,6 +43,129 @@ func (s *Server) findingsList(response http.ResponseWriter, request *http.Reques
 		Customers:       customers,
 		Notice:          noticeText(query.Get("notice")),
 	})
+}
+
+type currentFindingExport struct {
+	ExportedAt time.Time                 `json:"exported_at"`
+	Total      int                       `json:"total"`
+	Exported   int                       `json:"exported"`
+	Truncated  bool                      `json:"truncated"`
+	Filters    map[string]string         `json:"filters,omitempty"`
+	Sort       []string                  `json:"sort"`
+	Findings   []currentFindingExportRow `json:"findings"`
+}
+
+type currentFindingExportRow struct {
+	CustomerID       string    `json:"customer_id"`
+	CustomerName     string    `json:"customer_name"`
+	CID              string    `json:"cid,omitempty"`
+	TaskID           string    `json:"task_id"`
+	TaskName         string    `json:"task_name"`
+	SnapshotID       int64     `json:"snapshot_id"`
+	Fingerprint      string    `json:"fingerprint"`
+	NVTOID           string    `json:"nvt_oid"`
+	Title            string    `json:"title"`
+	Host             string    `json:"host"`
+	Port             string    `json:"port,omitempty"`
+	Location         string    `json:"location,omitempty"`
+	Severity         float64   `json:"severity"`
+	Threat           string    `json:"threat"`
+	QOD              int       `json:"qod"`
+	CVEs             []string  `json:"cves"`
+	Remediation      string    `json:"remediation,omitempty"`
+	FirstSeen        time.Time `json:"first_seen"`
+	LastSeen         time.Time `json:"last_seen"`
+	Lifecycle        string    `json:"lifecycle"`
+	Disposition      string    `json:"disposition"`
+	Justification    string    `json:"justification,omitempty"`
+	RemediationState string    `json:"remediation_state"`
+	TicketState      string    `json:"ticket_state"`
+}
+
+func (s *Server) findingsJSONExport(response http.ResponseWriter, request *http.Request) {
+	rowLimit := min(s.exportMaxRows, defaultExportMaxRows)
+	filter := findingFilterFromRequest(request, rowLimit)
+	filter.Page = 1
+	rows, total, err := s.repository.CurrentFindings(request.Context(), filter)
+	if err != nil {
+		s.internalError(response, err)
+		return
+	}
+	exportRows := make([]currentFindingExportRow, 0, len(rows))
+	for _, row := range rows {
+		exportRows = append(exportRows, currentFindingJSON(row))
+	}
+	payload := currentFindingExport{
+		ExportedAt: time.Now().UTC(),
+		Total:      total,
+		Exported:   len(exportRows),
+		Truncated:  len(exportRows) < total,
+		Filters:    currentFindingFilters(filter),
+		Sort:       []string{"severity:desc", "customer:asc", "host:asc", "title:asc"},
+		Findings:   exportRows,
+	}
+	response.Header().Set("Content-Type", "application/json")
+	response.Header().Set(
+		"Content-Disposition",
+		fmt.Sprintf("attachment; filename=%q", "current-findings-"+time.Now().Format("20060102-150405")+".json"),
+	)
+	writer := &byteCapWriter{writer: response, remaining: s.exportMaxBytes}
+	if err := json.NewEncoder(writer).Encode(payload); err != nil && !errors.Is(err, errExportByteLimit) {
+		s.logger.Error("current findings export failed", "error", err)
+	}
+	if writer.capped {
+		s.logger.Warn("current findings export cut off at byte limit", "limit", s.exportMaxBytes)
+	}
+}
+
+func findingFilterFromRequest(request *http.Request, pageSize int) store.FindingQuery {
+	query := request.URL.Query()
+	page, _ := strconv.Atoi(query.Get("page"))
+	return store.FindingQuery{
+		CustomerID: query.Get("customer"),
+		CID:        strings.TrimSpace(query.Get("cid")),
+		Task:       strings.TrimSpace(query.Get("task")),
+		Severity:   query.Get("severity"),
+		Host:       strings.TrimSpace(query.Get("host")),
+		Scope:      query.Get("scope"),
+		Ticket:     query.Get("ticket"),
+		Lifecycle:  query.Get("lifecycle"),
+		Page:       max(page, 1),
+		PageSize:   pageSize,
+	}
+}
+
+func currentFindingFilters(filter store.FindingQuery) map[string]string {
+	filters := make(map[string]string)
+	for name, value := range map[string]string{
+		"customer":  filter.CustomerID,
+		"cid":       filter.CID,
+		"task":      filter.Task,
+		"severity":  filter.Severity,
+		"host":      filter.Host,
+		"scope":     filter.Scope,
+		"ticket":    filter.Ticket,
+		"lifecycle": filter.Lifecycle,
+	} {
+		if value != "" {
+			filters[name] = value
+		}
+	}
+	return filters
+}
+
+func currentFindingJSON(row store.CurrentFinding) currentFindingExportRow {
+	return currentFindingExportRow{
+		CustomerID: row.CustomerID, CustomerName: row.CustomerName, CID: row.CID,
+		TaskID: row.TaskID, TaskName: row.TaskName, SnapshotID: row.SnapshotID,
+		Fingerprint: row.Fingerprint, NVTOID: row.NVTOID, Title: row.Title,
+		Host: row.Host, Port: row.Port, Location: row.Location,
+		Severity: row.Severity, Threat: row.Threat, QOD: row.QOD,
+		CVEs: row.CVEs, Remediation: row.Remediation,
+		FirstSeen: row.FirstSeen, LastSeen: row.LastSeen, Lifecycle: row.Lifecycle,
+		Disposition: row.Disposition, Justification: row.Justification,
+		RemediationState: row.RemediationState, TicketState: row.TicketState,
+	}
 }
 
 func (s *Server) findingStateUpdate(response http.ResponseWriter, request *http.Request) {

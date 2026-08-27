@@ -58,6 +58,7 @@ type pageData struct {
 	FindingPage      int
 	FindingPages     int
 	HookwiseStats    store.HookwiseStats
+	ScanAlerts       []store.ScanAlert
 }
 
 type reportFilter struct {
@@ -154,6 +155,14 @@ func (s *Server) render(
 	if data.Authenticated && data.Health == nil {
 		strip := s.health(request.Context())
 		data.Health = &strip
+	}
+	if data.Authenticated && data.ScanAlerts == nil {
+		alerts, err := s.repository.OpenScanAlerts(request.Context(), 20)
+		if err != nil {
+			s.logger.Error("loading scan alerts failed", "error", err)
+		} else {
+			data.ScanAlerts = alerts
+		}
 	}
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(response, name, data); err != nil {

@@ -79,7 +79,7 @@
         <td><strong class="threat-{{severityClass .Threat}}">{{printf "%.1f" .Severity}}</strong><small>{{.Threat}} · QOD {{.QOD}}%</small></td>
         <td><code>{{.Host}}</code></td>
         <td>{{.Port}}</td>
-        <td><strong>{{.Title}}</strong><small><code>{{.NVTOID}}</code></small><div class="tags">{{range .CVEs}}<span>{{.}}</span>{{end}}</div>{{if .Remediation}}<details><summary>Remediation</summary><p class="remediation">{{.Remediation}}</p></details>{{end}}</td>
+        <td><strong>{{.Title}}</strong><small><code>{{.NVTOID}}</code></small><div class="tags">{{range .CVEs}}{{if cveURL .}}<a href="{{cveURL .}}" target="_blank" rel="noopener noreferrer">{{.}} ↗</a>{{else}}<span>{{.}}</span>{{end}}{{end}}</div>{{if .Remediation}}<details><summary>Remediation</summary><p class="remediation">{{.Remediation}}</p></details>{{end}}</td>
         <td>{{if .Lifecycle}}<span class="badge badge-{{.Lifecycle}}">{{.Lifecycle}}</span>{{end}}<span class="badge badge-{{.Disposition}}">{{.Disposition}}</span><small>{{.RemediationState}}{{if .RemediationOwner}} · {{.RemediationOwner}}{{end}}{{if .DueDate}} · due {{.DueDate.Format "2006-01-02"}}{{end}}</small></td>
         <td>{{if ne .SLAState "none"}}<span class="badge badge-{{.SLAState}}">{{.SLAState}}</span>{{if .SLADeadline}}<small>{{.SLADeadline.Format "2006-01-02"}}</small>{{end}}{{else}}<small>no SLA</small>{{end}}</td>
         <td>
