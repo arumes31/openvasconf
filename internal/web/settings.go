@@ -28,10 +28,80 @@ func (s *Server) settingsPage(response http.ResponseWriter, request *http.Reques
 		Options:       options,
 		Notice:        connectionNotice(request.URL.Query().Get("connection")),
 	}
+	if ticketNotice := hookwiseNotice(request.URL.Query().Get("hookwise")); ticketNotice != "" {
+		data.Notice = ticketNotice
+	}
+	if s.hookwise != nil {
+		data.HookwiseStats, _ = s.hookwise.Stats(request.Context())
+	}
 	if optionsError != nil {
 		data.GreenboneError = optionsError.Error()
 	}
 	s.render(response, request, "settings.html", data)
+}
+
+func (s *Server) hookwiseSettingsUpdate(response http.ResponseWriter, request *http.Request) {
+	if s.hookwise == nil {
+		http.Error(response, "ticket integration unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	err := s.hookwise.Save(
+		request.Context(),
+		request.PostForm.Get("enabled") == "on",
+		request.PostForm.Get("endpoint"),
+		request.PostForm.Get("token"),
+	)
+	if err != nil {
+		settings, settingsErr := s.repository.Settings(request.Context())
+		if settingsErr != nil {
+			s.internalError(response, settingsErr)
+			return
+		}
+		options, _ := s.greenbone.Options(request.Context())
+		s.renderSettingsError(response, request, settings, options, err)
+		return
+	}
+	http.Redirect(response, request, "/settings?hookwise=saved", http.StatusSeeOther)
+}
+
+func (s *Server) hookwiseSettingsTest(response http.ResponseWriter, request *http.Request) {
+	if s.hookwise == nil {
+		http.Error(response, "ticket integration unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	result := "ok"
+	if err := s.hookwise.Test(request.Context()); err != nil {
+		s.logger.Warn("hookwise connection test failed", "error", err)
+		result = "failed"
+	}
+	http.Redirect(response, request, "/settings?hookwise="+result, http.StatusSeeOther)
+}
+
+func (s *Server) hookwiseRetry(response http.ResponseWriter, request *http.Request) {
+	if s.hookwise == nil {
+		http.Error(response, "ticket integration unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.hookwise.Retry(request.Context()); err != nil {
+		s.internalError(response, err)
+		return
+	}
+	http.Redirect(response, request, "/settings?hookwise=retry", http.StatusSeeOther)
+}
+
+func hookwiseNotice(value string) string {
+	switch value {
+	case "saved":
+		return "Hookwise settings saved and ticket reconciliation queued."
+	case "ok":
+		return "Hookwise accepted the non-ticketing connection test event."
+	case "failed":
+		return "Hookwise connection test failed; inspect the service log and endpoint configuration."
+	case "retry":
+		return "Failed Hookwise events were queued for immediate retry."
+	default:
+		return ""
+	}
 }
 
 func (s *Server) settingsUpdate(response http.ResponseWriter, request *http.Request) {

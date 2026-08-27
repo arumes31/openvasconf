@@ -130,6 +130,12 @@ func (s *Server) probeHealth(ctx context.Context) healthStrip {
 			Link:     link,
 		})
 	}
+	if s.hookwise != nil {
+		state, detail, guidance, link := s.hookwise.Health(probe)
+		components = append(components, healthComponent{
+			Name: "Tickets", State: state, Detail: detail, Guidance: guidance, Link: link,
+		})
+	}
 
 	return summarizeHealth(components)
 }

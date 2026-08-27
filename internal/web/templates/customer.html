@@ -8,6 +8,7 @@
   <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
   <section class="panel form-panel"><div class="panel-index">IDENTITY + SCOPE / 01</div>
     <label>Customer name<input name="name" value="{{.Form.Name}}" maxlength="100" placeholder="testcomp1" required></label>
+    <label>Hookwise customer CID<input name="cid" value="{{.Form.CID}}" maxlength="100" placeholder="customer-routing-id"><small>Sent as <code>cid</code> for Hookwise ticket routing. Letters, numbers, dot, underscore, colon, and hyphen are allowed.</small></label>
     <label>Description<textarea class="short-textarea" name="description" rows="3" maxlength="500" placeholder="Owner, purpose, or operational notes">{{.Form.Description}}</textarea></label>
     <label>Tags<input name="tags" value="{{.Form.Tags}}" placeholder="production, vienna, internet"><small>Comma or whitespace separated; up to 10 normalized tags.</small></label>
     <label>IPv4 addresses, CIDRs, and ranges<textarea id="networks" name="networks" rows="12" placeholder="10.1.0.0/16 # LAN&#10;192.168.10.0 # printer&#10;192.168.20.10-192.168.20.30 # branch office&#10;7.7.7.7/32 # internet" required>{{.Form.Networks}}</textarea><small>One per line or comma-separated. Append # and a comment to label an entry. Bare IPv4 addresses automatically become /32. Inclusive start-end ranges are converted to the smallest exact set of CIDRs.</small></label>

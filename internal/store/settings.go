@@ -20,6 +20,7 @@ func (s *Store) Settings(ctx context.Context) (customer.Settings, error) {
 		       timezone, schedule_weekdays, schedule_start_minute,
 		       schedule_end_minute,
 		       sla_critical_days, sla_high_days, sla_medium_days, sla_low_days,
+		       hookwise_enabled, hookwise_endpoint, hookwise_token_cipher,
 		       updated_at
 		FROM settings WHERE singleton = 1`).Scan(
 		&settings.InstallationID,
@@ -37,6 +38,9 @@ func (s *Store) Settings(ctx context.Context) (customer.Settings, error) {
 		&settings.SLA.HighDays,
 		&settings.SLA.MediumDays,
 		&settings.SLA.LowDays,
+		&settings.Hookwise.Enabled,
+		&settings.Hookwise.Endpoint,
+		&settings.Hookwise.TokenCipher,
 		&updatedAt,
 	)
 	if err != nil {
@@ -50,7 +54,36 @@ func (s *Store) Settings(ctx context.Context) (customer.Settings, error) {
 	if err != nil {
 		return customer.Settings{}, err
 	}
+	settings.Hookwise.TokenConfigured = settings.Hookwise.TokenCipher != ""
 	return settings, nil
+}
+
+// UpdateHookwiseSettings persists the integration configuration without
+// disturbing Greenbone inheritance or customer reconciliation state.
+func (s *Store) UpdateHookwiseSettings(
+	ctx context.Context,
+	settings customer.HookwiseSettings,
+) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE settings SET hookwise_enabled = ?, hookwise_endpoint = ?,
+		       hookwise_token_cipher = ?, updated_at = ?
+		WHERE singleton = 1`,
+		settings.Enabled,
+		settings.Endpoint,
+		settings.TokenCipher,
+		nowText(),
+	)
+	if err != nil {
+		return fmt.Errorf("updating hookwise settings: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking hookwise settings update: %w", err)
+	}
+	if rows != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateSettings(ctx context.Context, settings customer.Settings) error {

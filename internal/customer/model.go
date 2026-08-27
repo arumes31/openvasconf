@@ -11,6 +11,7 @@ type Customer struct {
 	ID                      string
 	Name                    string
 	SafeName                string
+	CID                     string
 	Description             string
 	Tags                    []string
 	ScheduleWeekday         int
@@ -81,7 +82,17 @@ type Settings struct {
 	Timezone       string
 	SchedulePolicy SchedulePolicy
 	SLA            SLAPolicy
+	Hookwise       HookwiseSettings
 	UpdatedAt      time.Time
+}
+
+// HookwiseSettings configures the single installation-wide ticket webhook.
+// TokenCipher is encrypted at rest and must never be rendered or exported.
+type HookwiseSettings struct {
+	Enabled         bool
+	Endpoint        string
+	TokenCipher     string
+	TokenConfigured bool
 }
 
 type SchedulePolicy struct {

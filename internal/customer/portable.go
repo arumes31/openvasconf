@@ -24,6 +24,7 @@ type ExportDocument struct {
 
 type ExportCustomer struct {
 	ID              string    `json:"id,omitempty"`
+	CID             string    `json:"cid,omitempty"`
 	Name            string    `json:"name"`
 	Description     string    `json:"description,omitempty"`
 	Tags            []string  `json:"tags,omitempty"`
@@ -45,6 +46,7 @@ func NewExportDocument(settings Settings, customers []Customer, now time.Time) E
 		}
 		values = append(values, ExportCustomer{
 			ID:              value.ID,
+			CID:             value.CID,
 			Name:            value.Name,
 			Description:     value.Description,
 			Tags:            value.Tags,
@@ -110,6 +112,9 @@ func (c ExportCustomer) Validate() error {
 	if len(c.Description) > 500 {
 		return errors.New("customer description must contain at most 500 characters")
 	}
+	if err := ValidateCID(c.CID); err != nil {
+		return err
+	}
 	if _, err := NormalizeTags(c.Tags...); err != nil {
 		return err
 	}
@@ -130,6 +135,21 @@ func (c ExportCustomer) Validate() error {
 	}
 	if _, err := time.LoadLocation(c.Timezone); err != nil {
 		return fmt.Errorf("invalid customer timezone %q: %w", c.Timezone, err)
+	}
+	return nil
+}
+
+// ValidateCID accepts the customer routing identifiers supported by
+// Hookwise/ConnectWise without allowing whitespace or control characters.
+func ValidateCID(value string) error {
+	if len(value) > 100 {
+		return errors.New("customer cid must contain at most 100 characters")
+	}
+	for _, char := range value {
+		if !(char >= 'a' && char <= 'z') && !(char >= 'A' && char <= 'Z') &&
+			!(char >= '0' && char <= '9') && !strings.ContainsRune("._:-", char) {
+			return errors.New("customer cid may contain only letters, numbers, dot, underscore, colon, and hyphen")
+		}
 	}
 	return nil
 }

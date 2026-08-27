@@ -1,0 +1,41 @@
+{{template "head" .}}
+<section class="hero-row"><div><p class="eyebrow">CURRENT EXPOSURE</p><h1>Global findings</h1><p class="lede small">One current row per customer, managed task, and exact finding fingerprint. Historical snapshots remain unchanged.</p></div><div class="button-row"><a class="secondary" href="/reports">Report snapshots</a><a class="secondary" href="/findings?scope=suppressed">Suppressed</a></div></section>
+
+<section class="overview-grid finding-overview">
+  <div class="metric"><span>Active high / critical</span><strong>{{.FindingMetrics.ActiveHighCritical}}</strong><small>severity ≥ 7.0</small></div>
+  <div class="metric"><span>Suppressed</span><strong>{{.FindingMetrics.Suppressed}}</strong><small>resolved + wont-fix</small></div>
+  <div class="metric"><span>Ticket events queued</span><strong>{{.FindingMetrics.TicketQueued}}</strong><small>durable outbox</small></div>
+  <div class="metric"><span>Ticket routing issues</span><strong>{{.FindingMetrics.TicketBlocked}}</strong><small>blocked or retrying</small></div>
+  <div class="metric"><span>Overdue SLA</span><strong>{{.FindingMetrics.Overdue}}</strong><small>active findings</small></div>
+</section>
+
+<section class="panel table-panel">
+  <div class="section-heading"><div><p class="eyebrow">LATEST SUCCESSFUL SNAPSHOTS</p><h2>{{.FindingTotal}} findings</h2></div><span class="badge">page {{.FindingPage}} / {{.FindingPages}}</span></div>
+  <form method="get" action="/findings" class="filter-bar filter-bar-wide">
+    <label>Customer<select name="customer"><option value="">All customers</option>{{range .Customers}}<option value="{{.ID}}" {{if selected $.FindingQuery.CustomerID .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+    <label>CID<input name="cid" value="{{.FindingQuery.CID}}" placeholder="routing id"></label>
+    <label>Task<input name="task" value="{{.FindingQuery.Task}}" placeholder="task name / id"></label>
+    <label>Host<input name="host" value="{{.FindingQuery.Host}}" placeholder="address"></label>
+    <label>Severity<select name="severity"><option value="">All</option>{{range $s := (list "critical" "high" "medium" "low")}}<option value="{{$s}}" {{if selected $.FindingQuery.Severity $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <label>View<select name="scope"><option value="active" {{if selected .FindingQuery.Scope "active"}}selected{{end}}>Active</option><option value="suppressed" {{if selected .FindingQuery.Scope "suppressed"}}selected{{end}}>Suppressed</option></select></label>
+    <label>Ticket<select name="ticket"><option value="">All</option>{{range $s := (list "none" "blocked" "queued_open" "open" "queued_close" "closed" "failed")}}<option value="{{$s}}" {{if selected $.FindingQuery.Ticket $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
+    <label>Lifecycle<select name="lifecycle"><option value="">All</option><option value="new" {{if selected .FindingQuery.Lifecycle "new"}}selected{{end}}>New</option><option value="recurring" {{if selected .FindingQuery.Lifecycle "recurring"}}selected{{end}}>Recurring</option></select></label>
+    <button class="secondary" type="submit">Apply filters</button>
+  </form>
+  {{if .CurrentFindings}}<div class="table-scroll"><table class="findings-table"><thead><tr><th>Customer / task</th><th>Finding</th><th>Asset</th><th>Severity</th><th>Seen</th><th>Ticket</th><th>Action</th></tr></thead><tbody>
+  {{range .CurrentFindings}}<tr>
+    <td><strong>{{.CustomerName}}</strong><small>CID {{if .CID}}{{.CID}}{{else}}not configured{{end}}</small><small>{{.TaskName}}</small></td>
+    <td><strong>{{.Title}}</strong><small>{{.NVTOID}}</small><code>{{.Fingerprint}}</code></td>
+    <td><strong>{{.Host}}</strong><small>{{.Port}}{{if .Location}} · {{.Location}}{{end}}</small></td>
+    <td><strong class="threat-{{severityClass .Threat}}">{{printf "%.1f" .Severity}}</strong><small>{{.Threat}} · QOD {{.QOD}}%</small></td>
+    <td><strong>{{.LastSeen.Format "2006-01-02 15:04"}}</strong><small><span class="badge badge-{{.Lifecycle}}">{{.Lifecycle}}</span> first {{.FirstSeen.Format "2006-01-02"}}</small><a href="/reports/{{.SnapshotID}}">Snapshot →</a></td>
+    <td><span class="status status-{{.TicketState}}">{{.TicketState}}</span>{{if not .CID}}<small class="warning-copy">CID required</small>{{end}}</td>
+    <td><details><summary>{{if or (eq .RemediationState "resolved") (eq .RemediationState "wont_fix")}}Reopen{{else}}Resolve / wont-fix{{end}}</summary><form method="post" action="/findings/state" class="finding-state-form"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="customer_id" value="{{.CustomerID}}"><input type="hidden" name="task_id" value="{{.TaskID}}"><input type="hidden" name="fingerprint" value="{{.Fingerprint}}"><label>State<select name="state"><option value="resolved">Resolved</option><option value="wont_fix">Wont-fix</option><option value="open">Reopen</option></select></label><label>Reason<input name="reason" maxlength="2000" value="{{.Justification}}" placeholder="Required when suppressing"></label><button class="secondary" type="submit">Save state</button></form></details></td>
+  </tr>{{end}}
+  </tbody></table></div>{{else}}<div class="empty-state"><span>NO MATCHING CURRENT FINDINGS</span><p>Adjust the filters or wait for the next successful report import.</p></div>{{end}}
+  <div class="button-row pagination-row">
+    {{if gt .FindingPage 1}}<form method="get" action="/findings"><input type="hidden" name="customer" value="{{.FindingQuery.CustomerID}}"><input type="hidden" name="cid" value="{{.FindingQuery.CID}}"><input type="hidden" name="task" value="{{.FindingQuery.Task}}"><input type="hidden" name="host" value="{{.FindingQuery.Host}}"><input type="hidden" name="severity" value="{{.FindingQuery.Severity}}"><input type="hidden" name="scope" value="{{.FindingQuery.Scope}}"><input type="hidden" name="ticket" value="{{.FindingQuery.Ticket}}"><input type="hidden" name="lifecycle" value="{{.FindingQuery.Lifecycle}}"><input type="hidden" name="page" value="{{sub .FindingPage 1}}"><button class="secondary" type="submit">← Previous</button></form>{{end}}
+    {{if lt .FindingPage .FindingPages}}<form method="get" action="/findings"><input type="hidden" name="customer" value="{{.FindingQuery.CustomerID}}"><input type="hidden" name="cid" value="{{.FindingQuery.CID}}"><input type="hidden" name="task" value="{{.FindingQuery.Task}}"><input type="hidden" name="host" value="{{.FindingQuery.Host}}"><input type="hidden" name="severity" value="{{.FindingQuery.Severity}}"><input type="hidden" name="scope" value="{{.FindingQuery.Scope}}"><input type="hidden" name="ticket" value="{{.FindingQuery.Ticket}}"><input type="hidden" name="lifecycle" value="{{.FindingQuery.Lifecycle}}"><input type="hidden" name="page" value="{{add .FindingPage 1}}"><button class="secondary" type="submit">Next →</button></form>{{end}}
+  </div>
+</section>
+{{template "foot" .}}

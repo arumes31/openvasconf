@@ -183,6 +183,9 @@ func (s *Server) customerCreate(response http.ResponseWriter, request *http.Requ
 		s.renderCustomerError(response, request, form, err)
 		return
 	}
+	if s.hookwise != nil {
+		s.hookwise.Trigger()
+	}
 	s.syncer.Trigger()
 	http.Redirect(response, request, "/", http.StatusSeeOther)
 }
@@ -224,6 +227,9 @@ func (s *Server) customerUpdate(response http.ResponseWriter, request *http.Requ
 	if err := s.repository.UpdateCustomer(request.Context(), value); err != nil {
 		s.renderCustomerError(response, request, form, err)
 		return
+	}
+	if s.hookwise != nil {
+		s.hookwise.Trigger()
 	}
 	s.syncer.Trigger()
 	http.Redirect(response, request, "/", http.StatusSeeOther)
@@ -271,6 +277,7 @@ func (s *Server) customerFromForm(
 ) (customer.Customer, networkplan.Plan, customerForm, error) {
 	form := customerForm{
 		Name:         strings.TrimSpace(request.PostForm.Get("name")),
+		CID:          strings.TrimSpace(request.PostForm.Get("cid")),
 		Description:  strings.TrimSpace(request.PostForm.Get("description")),
 		Tags:         strings.TrimSpace(request.PostForm.Get("tags")),
 		Networks:     strings.TrimSpace(request.PostForm.Get("networks")),
@@ -281,6 +288,9 @@ func (s *Server) customerFromForm(
 	}
 	if len(form.Description) > 500 {
 		return customer.Customer{}, networkplan.Plan{}, form, errors.New("customer description must contain at most 500 characters")
+	}
+	if err := customer.ValidateCID(form.CID); err != nil {
+		return customer.Customer{}, networkplan.Plan{}, form, err
 	}
 	tags, err := customer.NormalizeTags(form.Tags)
 	if err != nil {
@@ -312,6 +322,7 @@ func (s *Server) customerFromForm(
 	value := customer.Customer{
 		Name:        form.Name,
 		SafeName:    plan.CustomerKey,
+		CID:         form.CID,
 		Description: form.Description,
 		Tags:        tags,
 		Timezone:    settings.Timezone,
@@ -489,7 +500,11 @@ func buildChangePreview(existing *customer.Customer, desired customer.Customer, 
 		preview.Modifies++
 		preview.Unchanged--
 	}
-	preview.Summaries = []string{fmt.Sprintf("%d creates, %d changes, %d removals", preview.Creates, preview.Modifies, preview.Trashes)}
+	if existing.CID != desired.CID {
+		preview.Modifies++
+		preview.Summaries = append(preview.Summaries, fmt.Sprintf("Hookwise CID: %q → %q", existing.CID, desired.CID))
+	}
+	preview.Summaries = append([]string{fmt.Sprintf("%d creates, %d changes, %d removals", preview.Creates, preview.Modifies, preview.Trashes)}, preview.Summaries...)
 	return preview
 }
 

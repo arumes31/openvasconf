@@ -182,7 +182,7 @@ func (s *Server) reportRows(
 			return nil, 0, nil, previousErr
 		}
 
-		annotations, err = s.repository.AnnotationsForCustomer(ctx, snapshot.CustomerID)
+		annotations, err = s.repository.AnnotationsForTask(ctx, snapshot.CustomerID, snapshot.TaskID)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -190,7 +190,7 @@ func (s *Server) reportRows(
 		for _, finding := range findings {
 			fingerprints = append(fingerprints, finding.Fingerprint)
 		}
-		firstSeen, err = s.repository.FirstSeen(ctx, snapshot.CustomerID, fingerprints)
+		firstSeen, err = s.repository.FirstSeenForTask(ctx, snapshot.CustomerID, snapshot.TaskID, fingerprints)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -361,6 +361,7 @@ func (s *Server) reportAnnotate(response http.ResponseWriter, request *http.Requ
 
 	annotation := store.FindingAnnotation{
 		CustomerID:       snapshot.CustomerID,
+		TaskID:           snapshot.TaskID,
 		Fingerprint:      fingerprint,
 		Disposition:      disposition,
 		Justification:    justification,
@@ -373,6 +374,9 @@ func (s *Server) reportAnnotate(response http.ResponseWriter, request *http.Requ
 	if err := s.repository.UpsertAnnotation(ctx, annotation); err != nil {
 		s.internalError(response, err)
 		return
+	}
+	if s.hookwise != nil {
+		s.hookwise.Trigger()
 	}
 	http.Redirect(
 		response,
@@ -436,8 +440,8 @@ func (s *Server) reportCompare(response http.ResponseWriter, request *http.Reque
 		s.internalError(response, err)
 		return
 	}
-	if before.CustomerID == "" || before.CustomerID != after.CustomerID {
-		http.Error(response, "reports belong to different customers", http.StatusForbidden)
+	if before.CustomerID == "" || before.CustomerID != after.CustomerID || before.TaskID != after.TaskID {
+		http.Error(response, "reports belong to different customers or tasks", http.StatusForbidden)
 		return
 	}
 

@@ -24,5 +24,19 @@
   <div class="settings-meta"><span>INSTALLATION</span><code>{{.Settings.InstallationID}}</code></div>
   <button class="primary" type="submit">Save global defaults <span>→</span></button>
 </form>
+<section class="panel settings-panel hookwise-panel">
+  <div class="section-heading"><div><p class="eyebrow">TICKET ROUTING / 04</p><h2>Hookwise integration</h2><p>High and Critical findings open customer-routed tickets. Resolved, wont-fix, absent, or downgraded findings close them.</p></div><span class="status {{if .Settings.Hookwise.Enabled}}status-applied{{else}}status-pending{{end}}">{{if .Settings.Hookwise.Enabled}}armed{{else}}disabled{{end}}</span></div>
+  <form method="post" action="/settings/hookwise">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="settings-grid hookwise-grid">
+      <label class="check-label"><input type="checkbox" name="enabled" {{if .Settings.Hookwise.Enabled}}checked{{end}}><span>Enable ticket synchronization</span></label>
+      <label>Webhook endpoint<input type="url" name="endpoint" value="{{.Settings.Hookwise.Endpoint}}" placeholder="https://hookwise.example/webhook/endpoint-id"><small>Absolute HTTP(S) URL; redirects are not followed.</small></label>
+      <label>Bearer token<input type="password" name="token" value="" autocomplete="new-password" placeholder="{{if .Settings.Hookwise.TokenConfigured}}Configured — leave blank to keep{{else}}Required when enabled{{end}}"><small>Write-only and AES-256-GCM encrypted at rest.</small></label>
+      <div class="metric hookwise-metric"><span>Delivery queue</span><strong>{{.HookwiseStats.Pending}}</strong><small>{{.HookwiseStats.Failed}} retrying{{if .HookwiseStats.LastDelivered}} · last {{.HookwiseStats.LastDelivered.Format "2006-01-02 15:04"}}{{end}}</small></div>
+    </div>
+    <div class="button-row"><button class="primary" type="submit">Save Hookwise settings <span>→</span></button></div>
+  </form>
+  <div class="button-row hookwise-actions"><form method="post" action="/settings/hookwise/test"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="secondary" type="submit" {{if not .Settings.Hookwise.TokenConfigured}}disabled{{end}}>Test connection</button></form><form method="post" action="/settings/hookwise/retry"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="secondary" type="submit">Retry failed events</button></form></div>
+</section>
 <section class="panel operations-strip settings-operations" data-operations-url="/api/operations"><div><span class="eyebrow">GMP LATENCY</span><strong data-op-latency>Load live status…</strong></div><div><span>Active scans</span><strong data-op-active>—</strong><small data-op-task>Task status</small></div><div><span>Feed health</span><strong data-op-feeds>—</strong><small data-op-feed-age>Version and age</small></div></section>
 {{template "foot" .}}

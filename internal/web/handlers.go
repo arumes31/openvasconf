@@ -151,7 +151,9 @@ func noticeText(value string) string {
 	case "report-sync-requested":
 		return "Report synchronization requested; new snapshots appear after the next cycle."
 	case "annotation-saved":
-		return "Finding annotation saved; it applies to future snapshots of this customer too."
+		return "Finding annotation saved; it applies to future snapshots of this task too."
+	case "finding-state-saved":
+		return "Finding state saved and ticket reconciliation queued."
 	default:
 		return ""
 	}

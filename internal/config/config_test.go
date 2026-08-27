@@ -1,12 +1,39 @@
 package config
 
 import (
+	"encoding/base64"
 	"math"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestDecodeEncryptionKey(t *testing.T) {
+	raw := []byte("0123456789abcdef0123456789abcdef")
+	tests := []struct {
+		name    string
+		value   string
+		wantLen int
+		wantErr bool
+	}{
+		{name: "unset"},
+		{name: "raw", value: string(raw), wantLen: 32},
+		{name: "base64", value: base64.StdEncoding.EncodeToString(raw), wantLen: 32},
+		{name: "wrong length", value: "too-short", wantErr: true},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			key, err := decodeEncryptionKey(testCase.value)
+			if (err != nil) != testCase.wantErr {
+				t.Fatalf("decodeEncryptionKey() error = %v, wantErr %t", err, testCase.wantErr)
+			}
+			if len(key) != testCase.wantLen {
+				t.Errorf("key length = %d, want %d", len(key), testCase.wantLen)
+			}
+		})
+	}
+}
 
 func TestLoadReportFetchTimeout(t *testing.T) {
 	t.Setenv(adminSecretValueEnv, "admin-test-password")

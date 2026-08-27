@@ -155,7 +155,7 @@ func importedCustomer(value customer.ExportCustomer) (customer.Customer, error) 
 	}
 	result := customer.Customer{
 		ID: customerID, Name: strings.TrimSpace(value.Name), SafeName: networkplan.SafeName(value.Name),
-		Description: value.Description, Tags: tags, ScheduleWeekday: value.ScheduleWeekday,
+		CID: value.CID, Description: value.Description, Tags: tags, ScheduleWeekday: value.ScheduleWeekday,
 		ScheduleMinute: value.ScheduleMinute, Timezone: value.Timezone,
 		ScannerID: value.Scanner.ID, ScannerName: value.Scanner.Name,
 		ScanConfigID: value.ScanConfig.ID, ScanConfigName: value.ScanConfig.Name,

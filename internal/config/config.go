@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -50,6 +51,7 @@ type Config struct {
 	ExportMaxBytes          int64
 	SecureCookies           bool
 	TrustProxyTLSHeader     bool
+	HookwiseEncryptionKey   []byte
 }
 
 func Load() (Config, error) {
@@ -79,6 +81,17 @@ func load() (Config, []error) {
 	adminPassword, err := secret(adminSecretValueEnv, "OPENVASCONF_ADMIN_PASSWORD_FILE")
 	if err != nil {
 		problems = append(problems, fmt.Errorf("loading admin password: %w", err))
+	}
+	hookwiseKeyText, err := optionalSecret(
+		"OPENVASCONF_HOOKWISE_ENCRYPTION_KEY",
+		"OPENVASCONF_HOOKWISE_ENCRYPTION_KEY_FILE",
+	)
+	if err != nil {
+		problems = append(problems, fmt.Errorf("loading hookwise encryption key: %w", err))
+	}
+	hookwiseKey, err := decodeEncryptionKey(hookwiseKeyText)
+	if err != nil {
+		problems = append(problems, err)
 	}
 
 	reconcileEvery, err := duration("OPENVASCONF_RECONCILE_INTERVAL", defaultReconcileEvery)
@@ -167,6 +180,7 @@ func load() (Config, []error) {
 		ExportMaxBytes:          exportMaxBytes,
 		SecureCookies:           secureCookies,
 		TrustProxyTLSHeader:     trustProxyTLS,
+		HookwiseEncryptionKey:   hookwiseKey,
 	}
 
 	return cfg, append(problems, cfg.validate()...)
@@ -244,6 +258,26 @@ func secret(valueKey, fileKey string) (string, error) {
 		return strings.TrimSpace(string(contents)), nil
 	}
 	return os.Getenv(valueKey), nil
+}
+
+func optionalSecret(valueKey, fileKey string) (string, error) {
+	if strings.TrimSpace(os.Getenv(fileKey)) == "" && os.Getenv(valueKey) == "" {
+		return "", nil
+	}
+	return secret(valueKey, fileKey)
+}
+
+func decodeEncryptionKey(value string) ([]byte, error) {
+	if value == "" {
+		return nil, nil
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(value); err == nil && len(decoded) == 32 {
+		return decoded, nil
+	}
+	if len(value) == 32 {
+		return []byte(value), nil
+	}
+	return nil, errors.New("config: hookwise encryption key must be 32 raw bytes or base64 encoding of 32 bytes")
 }
 
 func duration(key string, fallback time.Duration) (time.Duration, error) {

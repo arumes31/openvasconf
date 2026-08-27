@@ -32,6 +32,7 @@ const (
 // lives outside the immutable snapshots and survives across scans.
 type FindingAnnotation struct {
 	CustomerID       string
+	TaskID           string
 	Fingerprint      string
 	Disposition      string
 	Justification    string
@@ -52,6 +53,40 @@ func (s *Store) UpsertAnnotation(ctx context.Context, value FindingAnnotation) e
 	}
 	if value.RemediationState == "" {
 		value.RemediationState = RemediationOpen
+	}
+	if value.TaskID != "" {
+		result, err := s.db.ExecContext(ctx, `
+			UPDATE finding_states SET disposition = ?, justification = ?, operator = ?,
+			       remediation_state = ?, remediation_owner = ?, due_date = ?,
+			       expires_at = ?, updated_at = ?
+			WHERE customer_id = ? AND task_id = ? AND fingerprint = ?`,
+			value.Disposition,
+			annotationText(value.Justification, maxAnnotationTextLength),
+			annotationText(value.Operator, maxAnnotationNameLength),
+			value.RemediationState,
+			annotationText(value.RemediationOwner, maxAnnotationNameLength),
+			nullableTimeText(value.DueDate),
+			nullableTimeText(value.ExpiresAt),
+			nowText(),
+			value.CustomerID,
+			value.TaskID,
+			value.Fingerprint,
+		)
+		if err != nil {
+			return fmt.Errorf("updating task finding annotation: %w", err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("checking task finding annotation: %w", err)
+		}
+		if rows != 1 {
+			return ErrNotFound
+		}
+		// Keep the legacy customer-wide annotation row synchronized for
+		// backward-compatible exports and upgrades from pre-task state.
+		legacy := value
+		legacy.TaskID = ""
+		return s.UpsertAnnotation(ctx, legacy)
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO finding_annotations(
@@ -84,6 +119,79 @@ func (s *Store) UpsertAnnotation(ctx context.Context, value FindingAnnotation) e
 		return fmt.Errorf("upserting finding annotation: %w", err)
 	}
 	return nil
+}
+
+// AnnotationsForTask returns the persistent operator state for one managed
+// scan task, keyed by finding fingerprint.
+func (s *Store) AnnotationsForTask(
+	ctx context.Context,
+	customerID,
+	taskID string,
+) (result map[string]FindingAnnotation, returnErr error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT customer_id, task_id, fingerprint, disposition, justification,
+		       operator, remediation_state, remediation_owner,
+		       COALESCE(due_date, ''), COALESCE(expires_at, ''),
+		       created_at, updated_at
+		FROM finding_states
+		WHERE customer_id = ? AND task_id = ?
+		ORDER BY updated_at DESC`,
+		customerID,
+		taskID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying task finding annotations: %w", err)
+	}
+	defer func() {
+		returnErr = closeRows(rows, "task finding annotations query", returnErr)
+	}()
+	result = make(map[string]FindingAnnotation)
+	for rows.Next() {
+		annotation, scanErr := scanTaskAnnotation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result[annotation.Fingerprint] = annotation
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating task finding annotations: %w", err)
+	}
+	return result, nil
+}
+
+func scanTaskAnnotation(rows reportSnapshotScanner) (FindingAnnotation, error) {
+	var annotation FindingAnnotation
+	var dueDate, expiresAt, createdAt, updatedAt string
+	if err := rows.Scan(
+		&annotation.CustomerID,
+		&annotation.TaskID,
+		&annotation.Fingerprint,
+		&annotation.Disposition,
+		&annotation.Justification,
+		&annotation.Operator,
+		&annotation.RemediationState,
+		&annotation.RemediationOwner,
+		&dueDate,
+		&expiresAt,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return FindingAnnotation{}, fmt.Errorf("scanning task finding annotation: %w", err)
+	}
+	var err error
+	if annotation.DueDate, err = parseNullableTime(dueDate); err != nil {
+		return FindingAnnotation{}, err
+	}
+	if annotation.ExpiresAt, err = parseNullableTime(expiresAt); err != nil {
+		return FindingAnnotation{}, err
+	}
+	if annotation.CreatedAt, err = parseTime(createdAt); err != nil {
+		return FindingAnnotation{}, err
+	}
+	if annotation.UpdatedAt, err = parseTime(updatedAt); err != nil {
+		return FindingAnnotation{}, err
+	}
+	return annotation, nil
 }
 
 // Annotation returns one annotation or ErrNotFound when none exists.
@@ -205,11 +313,12 @@ func (s *Store) PreviousImportedSnapshot(
 		       COALESCE(r.imported_at, ''), r.created_at
 		FROM report_snapshots r
 		LEFT JOIN customers c ON c.id = r.customer_id
-		WHERE r.customer_id = ? AND r.import_state = ?
+		WHERE r.customer_id = ? AND r.task_id = ? AND r.import_state = ?
 		  AND (r.scan_end_at < ? OR (r.scan_end_at = ? AND r.id < ?))
 		ORDER BY r.scan_end_at DESC, r.id DESC
 		LIMIT 1`,
 		snapshot.CustomerID,
+		snapshot.TaskID,
 		ImportStateImported,
 		reportTimeText(snapshot.ScanEnd),
 		reportTimeText(snapshot.ScanEnd),
@@ -234,20 +343,44 @@ func (s *Store) PreviousImportedSnapshot(
 // limit.
 const firstSeenChunkSize = 500
 
-// FirstSeen returns the earliest scan end time at which each given
-// fingerprint appeared in an imported snapshot of the customer. One grouped
-// query per chunk avoids per-fingerprint lookups.
+// FirstSeen preserves the customer-wide query used by load diagnostics.
 func (s *Store) FirstSeen(
 	ctx context.Context,
 	customerID string,
+	fingerprints []string,
+) (map[string]time.Time, error) {
+	return s.firstSeen(ctx, customerID, "", fingerprints)
+}
+
+// FirstSeenForTask scopes first-seen dates to the chosen ticket/finding
+// identity: customer plus managed task plus fingerprint.
+func (s *Store) FirstSeenForTask(
+	ctx context.Context,
+	customerID,
+	taskID string,
+	fingerprints []string,
+) (map[string]time.Time, error) {
+	return s.firstSeen(ctx, customerID, taskID, fingerprints)
+}
+
+func (s *Store) firstSeen(
+	ctx context.Context,
+	customerID,
+	taskID string,
 	fingerprints []string,
 ) (map[string]time.Time, error) {
 	result := make(map[string]time.Time, len(fingerprints))
 	for start := 0; start < len(fingerprints); start += firstSeenChunkSize {
 		chunk := fingerprints[start:min(start+firstSeenChunkSize, len(fingerprints))]
 		placeholders := make([]string, len(chunk))
-		arguments := make([]any, 0, len(chunk)+2)
-		arguments = append(arguments, customerID, ImportStateImported)
+		arguments := make([]any, 0, len(chunk)+3)
+		arguments = append(arguments, customerID)
+		taskClause := ""
+		if taskID != "" {
+			taskClause = " AND r.task_id = ?"
+			arguments = append(arguments, taskID)
+		}
+		arguments = append(arguments, ImportStateImported)
 		for index, fingerprint := range chunk {
 			placeholders[index] = "?"
 			arguments = append(arguments, fingerprint)
@@ -259,7 +392,7 @@ func (s *Store) FirstSeen(
 			SELECT f.fingerprint, MIN(r.scan_end_at)
 			FROM finding_snapshots f
 			JOIN report_snapshots r ON r.id = f.snapshot_id
-			WHERE r.customer_id = ? AND r.import_state = ?
+			WHERE r.customer_id = ?`+taskClause+` AND r.import_state = ?
 			  AND f.fingerprint IN (`+strings.Join(placeholders, ",")+`)
 			GROUP BY f.fingerprint`,
 			arguments...,
