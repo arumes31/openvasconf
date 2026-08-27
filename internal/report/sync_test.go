@@ -31,6 +31,19 @@ type fakeReportStore struct {
 	findings      map[string][]store.FindingSnapshot
 	failures      []recordedFailure
 	taskCustomers map[string]string
+	resetCount    int
+}
+
+func (f *fakeReportStore) ResetFailedReportImports(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resetCount++
+	for reportID, state := range f.states {
+		if state == store.ImportStateFailed {
+			f.attempts[reportID] = 0
+		}
+	}
+	return nil
 }
 
 func newFakeReportStore() *fakeReportStore {
@@ -327,6 +340,40 @@ func TestSyncerFailureBackoffAndSanitizedDiagnostic(t *testing.T) {
 	if greenbone.fetchedCount() != 1 {
 		t.Errorf("fetched = %d, want 1 after the attempt budget is exhausted", greenbone.fetchedCount())
 	}
+}
+
+func TestSyncerManualTriggerRetriesExhaustedReports(t *testing.T) {
+	t.Parallel()
+
+	repository := newFakeReportStore()
+	repository.states["report-exhausted"] = store.ImportStateFailed
+	repository.attempts["report-exhausted"] = maxImportAttempts
+	repository.customers["report-exhausted"] = "customer-1"
+	greenbone := &fakeReportGMP{
+		reports: map[string]gmp.ReportDetails{
+			"report-exhausted": {ID: "report-exhausted", Status: "Done"},
+		},
+	}
+	syncer := newTestSyncer(repository, greenbone)
+	syncer.nextRetry["report-exhausted"] = time.Now().Add(time.Hour)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go syncer.Run(ctx)
+	syncer.Trigger()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		repository.mu.Lock()
+		state := repository.states["report-exhausted"]
+		resetCount := repository.resetCount
+		repository.mu.Unlock()
+		if state == store.ImportStateImported && resetCount == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("manual trigger did not requeue and import the exhausted report")
 }
 
 func TestSyncerAuthFailureAbortsCycle(t *testing.T) {

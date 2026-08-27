@@ -258,6 +258,48 @@ func TestReportImportFailureRetriesAndReimport(t *testing.T) {
 	}
 }
 
+func TestResetFailedReportImportsRequeuesOnlyFailures(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	repository := openTestStore(t)
+	for range 5 {
+		if err := repository.RecordReportImportFailure(
+			ctx,
+			"report-failed",
+			"task-failed",
+			"failed task",
+			"",
+			"temporary timeout",
+		); err != nil {
+			t.Fatalf("RecordReportImportFailure() error = %v", err)
+		}
+	}
+	if err := repository.SaveReportSnapshot(
+		ctx,
+		ReportSnapshot{ReportID: "report-imported", Status: "Done"},
+		nil,
+	); err != nil {
+		t.Fatalf("SaveReportSnapshot() error = %v", err)
+	}
+
+	if err := repository.ResetFailedReportImports(ctx); err != nil {
+		t.Fatalf("ResetFailedReportImports() error = %v", err)
+	}
+	pending, err := repository.PendingReportRetries(ctx, 5)
+	if err != nil {
+		t.Fatalf("PendingReportRetries() error = %v", err)
+	}
+	if len(pending) != 1 || pending[0].ReportID != "report-failed" ||
+		pending[0].ImportAttempts != 0 {
+		t.Fatalf("pending retries after reset = %#v", pending)
+	}
+	state, err := repository.ReportImportState(ctx, "report-imported")
+	if err != nil || state != ImportStateImported {
+		t.Fatalf("imported report after reset = %q, %v", state, err)
+	}
+}
+
 func TestCustomerForManagedTask(t *testing.T) {
 	t.Parallel()
 

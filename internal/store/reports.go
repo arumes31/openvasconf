@@ -266,6 +266,19 @@ func (s *Store) RecordReportImportFailure(
 	return nil
 }
 
+// ResetFailedReportImports rearms failed snapshots for an operator-requested
+// synchronization cycle. Imported snapshots remain immutable and untouched.
+func (s *Store) ResetFailedReportImports(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE report_snapshots SET import_attempts = 0
+		WHERE import_state = ?`,
+		ImportStateFailed,
+	); err != nil {
+		return fmt.Errorf("resetting failed report imports: %w", err)
+	}
+	return nil
+}
+
 // ListReportSnapshots returns snapshots newest first, joined with the
 // customer name. An empty customerID lists snapshots of every customer.
 func (s *Store) ListReportSnapshots(

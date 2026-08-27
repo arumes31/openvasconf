@@ -164,6 +164,79 @@ func TestClientProtocolError(t *testing.T) {
 	}
 }
 
+func TestClientRefreshesDeadlineWhileResponseStreams(t *testing.T) {
+	t.Parallel()
+
+	const idleTimeout = 150 * time.Millisecond
+	responseChunks := []string{
+		`<get_version_response `,
+		`status="200" `,
+		`status_text="OK">`,
+		`<version>22.7</version>`,
+		`</get_version_response>`,
+	}
+	dial := func(_ context.Context, _, _ string) (net.Conn, error) {
+		clientSide, serverSide := net.Pipe()
+		go func() {
+			defer func() { _ = serverSide.Close() }()
+			decoder := xml.NewDecoder(serverSide)
+			for requestIndex := range 2 {
+				var request struct{ XMLName xml.Name }
+				if err := decoder.Decode(&request); err != nil {
+					return
+				}
+				if requestIndex == 0 {
+					_, _ = serverSide.Write([]byte(
+						`<authenticate_response status="200" status_text="OK"/>`,
+					))
+					continue
+				}
+				for _, chunk := range responseChunks {
+					time.Sleep(50 * time.Millisecond)
+					if _, err := serverSide.Write([]byte(chunk)); err != nil {
+						return
+					}
+				}
+			}
+		}()
+		return clientSide, nil
+	}
+	client := NewWithDialer("admin", "secret", idleTimeout, dial)
+
+	version, err := client.Ping(t.Context())
+	if err != nil {
+		t.Fatalf("Ping() streaming response error = %v", err)
+	}
+	if version != "22.7" {
+		t.Errorf("Ping() version = %q, want 22.7", version)
+	}
+}
+
+func TestClientIdleResponseStillTimesOut(t *testing.T) {
+	t.Parallel()
+
+	dial := func(_ context.Context, _, _ string) (net.Conn, error) {
+		clientSide, serverSide := net.Pipe()
+		go func() {
+			defer func() { _ = serverSide.Close() }()
+			var request struct{ XMLName xml.Name }
+			_ = xml.NewDecoder(serverSide).Decode(&request)
+			time.Sleep(250 * time.Millisecond)
+		}()
+		return clientSide, nil
+	}
+	client := NewWithDialer("admin", "secret", 50*time.Millisecond, dial)
+
+	_, err := client.Ping(t.Context())
+	if err == nil {
+		t.Fatal("Ping() idle response error = nil, want timeout")
+	}
+	var networkError net.Error
+	if !errors.As(err, &networkError) || !networkError.Timeout() {
+		t.Fatalf("Ping() idle response error = %v, want network timeout", err)
+	}
+}
+
 func TestClientFindResourceByOwnershipMarker(t *testing.T) {
 	t.Parallel()
 

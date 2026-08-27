@@ -77,8 +77,17 @@ func (c *Client) Report(
 	}{ReportID: reportID, Details: "1", Filter: "first=1 rows=-1"}
 
 	parser := &reportParser{maxResults: limits.MaxResults}
-	if err := c.streamCall(ctx, request, limits.MaxBytes, parser.consume); err != nil {
+	if err := c.streamCallWithTimeout(
+		ctx,
+		request,
+		limits.MaxBytes,
+		c.reportTimeout,
+		parser.consume,
+	); err != nil {
 		return ReportDetails{}, err
+	}
+	if !parser.sawResponse {
+		return ReportDetails{}, errors.New("gmp: get_reports returned an empty response")
 	}
 	if err := checkStatus("get_reports", responseStatus{
 		Status:     parser.status,
@@ -107,11 +116,12 @@ func (c *Client) Report(
 // Result elements are decoded one at a time; everything else is captured as
 // metadata when its path matches the inner report payload.
 type reportParser struct {
-	maxResults int
-	status     string
-	statusText string
-	stack      []string
-	details    ReportDetails
+	maxResults  int
+	sawResponse bool
+	status      string
+	statusText  string
+	stack       []string
+	details     ReportDetails
 }
 
 func (p *reportParser) consume(decoder *xml.Decoder) error {
@@ -127,6 +137,7 @@ func (p *reportParser) consume(decoder *xml.Decoder) error {
 		case xml.StartElement:
 			switch element.Name.Local {
 			case "get_reports_response":
+				p.sawResponse = true
 				for _, attribute := range element.Attr {
 					switch attribute.Name.Local {
 					case "status":

@@ -350,6 +350,7 @@ services:
       OPENVASCONF_UPDATER_SOCKET: "/run/openvasconf-updater/updater.sock"
       OPENVASCONF_ADMIN_PASSWORD_FILE: "/run/secrets/openvasconf_admin_password"
       OPENVASCONF_TIMEZONE: "${OPENVASCONF_TIMEZONE:-Europe/Vienna}"
+      OPENVASCONF_REPORT_FETCH_TIMEOUT: "${OPENVASCONF_REPORT_FETCH_TIMEOUT:-5m}"
       OPENVASCONF_SECURE_COOKIES: "${OPENVASCONF_SECURE_COOKIES:-false}"
     secrets:
       - openvasconf_admin_password

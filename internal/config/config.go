@@ -20,6 +20,7 @@ const (
 	defaultExternalTimeout        = 15 * time.Second
 	defaultSessionLifetime        = 12 * time.Hour
 	defaultReportSyncEvery        = 2 * time.Minute
+	defaultReportFetchTimeout     = 5 * time.Minute
 	defaultReportMaxXMLBytes      = 64 << 20
 	defaultReportMaxFindings      = 50000
 	defaultReportImportConcurrent = 1
@@ -41,6 +42,7 @@ type Config struct {
 	ExternalTimeout         time.Duration
 	SessionLifetime         time.Duration
 	ReportSyncInterval      time.Duration
+	ReportFetchTimeout      time.Duration
 	ReportMaxXMLBytes       int64
 	ReportMaxFindings       int
 	ReportImportConcurrency int
@@ -98,6 +100,13 @@ func load() (Config, []error) {
 	if err != nil {
 		problems = append(problems, err)
 	}
+	reportFetchTimeout, err := duration(
+		"OPENVASCONF_REPORT_FETCH_TIMEOUT",
+		defaultReportFetchTimeout,
+	)
+	if err != nil {
+		problems = append(problems, err)
+	}
 
 	reportMaxXMLBytes, err := integer("OPENVASCONF_REPORT_MAX_XML_BYTES", defaultReportMaxXMLBytes)
 	if err != nil {
@@ -150,6 +159,7 @@ func load() (Config, []error) {
 		ExternalTimeout:         externalTimeout,
 		SessionLifetime:         sessionLifetime,
 		ReportSyncInterval:      reportSyncInterval,
+		ReportFetchTimeout:      reportFetchTimeout,
 		ReportMaxXMLBytes:       reportMaxXMLBytes,
 		ReportMaxFindings:       reportMaxFindings,
 		ReportImportConcurrency: reportImportConcurrency,
@@ -199,6 +209,9 @@ func (c Config) validate() []error {
 	}
 	if c.ReportSyncInterval <= 0 {
 		problems = append(problems, errors.New("config: OPENVASCONF_REPORT_SYNC_INTERVAL must be positive"))
+	}
+	if c.ReportFetchTimeout <= 0 {
+		problems = append(problems, errors.New("config: OPENVASCONF_REPORT_FETCH_TIMEOUT must be positive"))
 	}
 	if c.ReportMaxXMLBytes <= 0 {
 		problems = append(problems, errors.New("config: OPENVASCONF_REPORT_MAX_XML_BYTES must be positive"))
