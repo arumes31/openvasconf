@@ -191,13 +191,13 @@ func (c *activityDeadlineConn) Write(buffer []byte) (int, error) {
 
 func (c *activityDeadlineConn) refreshDeadline() error {
 	if c.ctx.Err() != nil {
-		return c.Conn.SetDeadline(time.Now())
+		return c.SetDeadline(time.Now())
 	}
 	deadline := time.Now().Add(c.idleTimeout)
 	if contextDeadline, ok := c.ctx.Deadline(); ok && contextDeadline.Before(deadline) {
 		deadline = contextDeadline
 	}
-	return c.Conn.SetDeadline(deadline)
+	return c.SetDeadline(deadline)
 }
 
 var errResponseTooLarge = errors.New("gmp: response exceeds the configured byte limit")
