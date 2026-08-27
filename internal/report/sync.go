@@ -39,6 +39,7 @@ type Store interface {
 		ctx context.Context,
 		reportID, taskID, taskName, customerID, diagnostic string,
 	) error
+	DeleteFailedReportImport(ctx context.Context, reportID string) error
 	ResetFailedReportImports(ctx context.Context) error
 	PendingReportRetries(ctx context.Context, maxAttempts int) ([]store.ReportSnapshot, error)
 	CustomerForManagedTask(ctx context.Context, gvmTaskID string) (string, error)
@@ -242,6 +243,7 @@ type importJob struct {
 	taskID     string
 	taskName   string
 	customerID string
+	retry      bool
 }
 
 // discover collects reports that still need importing: new last reports of
@@ -300,6 +302,7 @@ func (s *Syncer) discover(ctx context.Context) ([]importJob, error) {
 			taskID:     retry.TaskID,
 			taskName:   retry.TaskName,
 			customerID: retry.CustomerID,
+			retry:      true,
 		})
 		seen[retry.ReportID] = struct{}{}
 	}
@@ -324,6 +327,14 @@ func (s *Syncer) importOne(ctx context.Context, job importJob) error {
 	if err != nil {
 		if isAuthFailure(err) {
 			return err
+		}
+		if job.retry && isMissingReport(err) {
+			if deleteErr := s.store.DeleteFailedReportImport(ctx, job.reportID); deleteErr != nil {
+				return errors.Join(err, deleteErr)
+			}
+			s.clearRetry(job.reportID)
+			s.logger.Info("stale report import removed", "report_id", job.reportID)
+			return nil
 		}
 		diagnostic := sanitizeDiagnostic(err)
 		if recordErr := s.store.RecordReportImportFailure(
@@ -394,6 +405,13 @@ func isAuthFailure(err error) bool {
 			strings.HasPrefix(protocolError.Status, "4")
 	}
 	return false
+}
+
+func isMissingReport(err error) bool {
+	var protocolError *gmp.ProtocolError
+	return errors.As(err, &protocolError) &&
+		protocolError.Command == "get_reports" &&
+		protocolError.Status == "404"
 }
 
 // sanitizeDiagnostic reduces a failure to a bounded single-line message. GMP
