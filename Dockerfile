@@ -23,9 +23,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/openvasconf ./cmd/openvasconf \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/openvasconf-updater ./cmd/openvasconf-updater
 
-FROM docker:29-cli@sha256:000bb62ff495f986c9f5578eb67cc2cb98b91138eda81d7762d5371eb8a497fe AS updater
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS updater
 
-RUN addgroup -g 1001 -S openvasconf \
+RUN apk add --no-cache \
+        docker-cli=29.5.3-r0 \
+        docker-cli-compose=5.1.4-r0 \
+        libcrypto3=3.5.8-r0 \
+        libssl3=3.5.8-r0 \
+    && addgroup -g 1001 -S openvasconf \
     && adduser -u 1001 -S -D -H -G openvasconf openvasconf \
     && install -d -o openvasconf -g openvasconf -m 0700 /state /backups \
     && install -d -o openvasconf -g openvasconf -m 0750 /run/openvasconf-updater
@@ -38,7 +43,10 @@ ENTRYPOINT ["/usr/local/bin/openvasconf-updater"]
 
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
 
-RUN addgroup -g 1001 -S openvasconf \
+RUN apk add --no-cache \
+        libcrypto3=3.5.8-r0 \
+        libssl3=3.5.8-r0 \
+    && addgroup -g 1001 -S openvasconf \
     && adduser -u 1001 -S -D -H -G openvasconf openvasconf \
     && install -d -o openvasconf -g openvasconf -m 0700 /data
 COPY --from=build --chown=openvasconf:openvasconf /out/openvasconf /usr/local/bin/openvasconf
