@@ -270,6 +270,9 @@ func (c *Compose) Snapshot(ctx context.Context, services []string) ([]Image, err
 	}
 	result := make([]Image, 0, len(images))
 	for _, image := range images {
+		if image.Service == "" {
+			image.Service = c.serviceFromContainerName(image.containerName, services)
+		}
 		if !allowed[image.Service] {
 			continue
 		}
@@ -282,6 +285,15 @@ func (c *Compose) Snapshot(ctx context.Context, services []string) ([]Image, err
 		return result[left].Service < result[right].Service
 	})
 	return result, nil
+}
+
+func (c *Compose) serviceFromContainerName(containerName string, services []string) string {
+	for _, service := range services {
+		if containerName == c.project+"-"+service+"-1" {
+			return service
+		}
+	}
+	return ""
 }
 
 func (c *Compose) ResolvedSnapshot(ctx context.Context, services []string) ([]Image, error) {
@@ -340,10 +352,11 @@ func splitImageReference(reference string) (string, string) {
 
 func decodeImages(contents []byte) ([]Image, error) {
 	type wireImage struct {
-		ID         string `json:"ID"`
-		Repository string `json:"Repository"`
-		Service    string `json:"Service"`
-		Tag        string `json:"Tag"`
+		ID            string `json:"ID"`
+		ContainerName string `json:"ContainerName"`
+		Repository    string `json:"Repository"`
+		Service       string `json:"Service"`
+		Tag           string `json:"Tag"`
 	}
 	var list []wireImage
 	if err := json.Unmarshal(contents, &list); err != nil {
@@ -365,7 +378,11 @@ func decodeImages(contents []byte) ([]Image, error) {
 	result := make([]Image, 0, len(list))
 	for _, value := range list {
 		result = append(result, Image{
-			Service: value.Service, Repository: value.Repository, Tag: value.Tag, ID: value.ID,
+			Service:       value.Service,
+			Repository:    value.Repository,
+			Tag:           value.Tag,
+			ID:            value.ID,
+			containerName: value.ContainerName,
 		})
 	}
 	return result, nil

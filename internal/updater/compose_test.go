@@ -8,12 +8,13 @@ import (
 )
 
 type recordingExecutor struct {
-	calls [][]string
+	calls  [][]string
+	output []byte
 }
 
 func (e *recordingExecutor) Output(_ context.Context, args ...string) ([]byte, error) {
 	e.calls = append(e.calls, append([]string{"docker"}, args...))
-	return nil, nil
+	return e.output, nil
 }
 
 func (*recordingExecutor) OutputTo(context.Context, io.Writer, ...string) error  { return nil }
@@ -53,6 +54,46 @@ func TestDecodeImagesAcceptsArrayAndJSONLines(t *testing.T) {
 		if len(images) != 1 || images[0].Service != "gvmd" {
 			t.Fatalf("images = %#v", images)
 		}
+	}
+}
+
+func TestSnapshotAcceptsComposeV5ContainerName(t *testing.T) {
+	executor := &recordingExecutor{output: []byte(`[{"ID":"sha256:a","ContainerName":"greenbone-community-edition-gvmd-1","Repository":"registry.community.greenbone.net/community/gvmd","Tag":"stable"}]`)}
+	compose, err := NewCompose(
+		executor,
+		"/deployment/greenbone-compose.yaml",
+		"greenbone-community-edition",
+		"/backups",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	images, err := compose.Snapshot(t.Context(), []string{"gvmd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 1 || images[0].Service != "gvmd" {
+		t.Fatalf("images = %#v", images)
+	}
+}
+
+func TestSnapshotRejectsUnexpectedContainerName(t *testing.T) {
+	executor := &recordingExecutor{output: []byte(`[{"ID":"sha256:a","ContainerName":"other-gvmd-1","Repository":"registry.community.greenbone.net/community/gvmd","Tag":"stable"}]`)}
+	compose, err := NewCompose(
+		executor,
+		"/deployment/greenbone-compose.yaml",
+		"greenbone-community-edition",
+		"/backups",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	images, err := compose.Snapshot(t.Context(), []string{"gvmd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 0 {
+		t.Fatalf("images = %#v, want none", images)
 	}
 }
 
