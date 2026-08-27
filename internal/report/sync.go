@@ -44,6 +44,7 @@ type Store interface {
 	PendingReportRetries(ctx context.Context, maxAttempts int) ([]store.ReportSnapshot, error)
 	CustomerForManagedTask(ctx context.Context, gvmTaskID string) (string, error)
 	ReportImportStats(ctx context.Context) (store.ReportImportStats, error)
+	RecordScanFailure(ctx context.Context, alert store.ScanAlert) (bool, error)
 }
 
 // Greenbone is the narrow GMP facade the syncer needs.
@@ -257,6 +258,9 @@ func (s *Syncer) discover(ctx context.Context) ([]importJob, error) {
 	jobs := make([]importJob, 0)
 	seen := make(map[string]struct{})
 	for _, task := range tasks {
+		if err := s.recordScanFailure(ctx, task); err != nil {
+			return nil, err
+		}
 		lastReport := task.LastReport
 		if lastReport == nil || lastReport.ID == "" || !importableStatus(lastReport.Status) {
 			continue
@@ -307,6 +311,67 @@ func (s *Syncer) discover(ctx context.Context) ([]importJob, error) {
 		seen[retry.ReportID] = struct{}{}
 	}
 	return jobs, nil
+}
+
+func (s *Syncer) recordScanFailure(ctx context.Context, task gmp.TaskStatus) error {
+	reportID, status, reason, failed := failedScan(task)
+	if !failed {
+		return nil
+	}
+	customerID, err := s.store.CustomerForManagedTask(ctx, task.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("report: mapping failed task to customer: %w", err)
+	}
+	inserted, err := s.store.RecordScanFailure(ctx, store.ScanAlert{
+		CustomerID: customerID,
+		TaskID:     task.ID,
+		TaskName:   task.Name,
+		ReportID:   reportID,
+		Status:     status,
+		Reason:     reason,
+	})
+	if err != nil {
+		return fmt.Errorf("report: recording failed scan: %w", err)
+	}
+	if inserted {
+		s.logger.Warn(
+			"managed scan failed",
+			"customer_id", customerID,
+			"task_id", task.ID,
+			"report_id", reportID,
+			"status", status,
+		)
+	}
+	return nil
+}
+
+func failedScan(task gmp.TaskStatus) (reportID, status, reason string, failed bool) {
+	if task.LastReport == nil || task.LastReport.ID == "" {
+		return "", "", "", false
+	}
+	status = strings.TrimSpace(task.LastReport.Status)
+	if !failedScanStatus(status) {
+		status = strings.TrimSpace(task.Status)
+	}
+	if !failedScanStatus(status) {
+		return "", "", "", false
+	}
+	return task.LastReport.ID,
+		status,
+		fmt.Sprintf("Greenbone scan ended with status %q", status),
+		true
+}
+
+func failedScanStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "aborted", "error", "failed", "internal error", "interrupted":
+		return true
+	default:
+		return false
+	}
 }
 
 // importableStatus treats every report status that is not an active scan

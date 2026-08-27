@@ -247,9 +247,11 @@ func (c *Controller) Trigger(
 		c.mu.Unlock()
 		return Operation{}, err
 	}
+	startedAt := c.now().UTC()
 	operation := Operation{
 		ID: operationID, Kind: kind, Trigger: request.Trigger,
-		State: StateQueued, Phase: "queued", StartedAt: c.now().UTC(),
+		State: StateQueued, Phase: "queued", StartedAt: startedAt,
+		PhaseStartedAt: startedAt,
 	}
 	c.state.Active = cloneOperation(&operation)
 	c.state.BackupPath = ""
@@ -564,8 +566,8 @@ func (c *Controller) rollback(
 		c.pauseAutomation("The restored stack could not be verified; manual recovery is required.")
 		return errors.Join(cause, fmt.Errorf("verifying rollback: %w", err))
 	}
-	c.finish(operationID, StateRolledBack, "Upgrade failed and the previous Greenbone stack was restored.")
 	c.pauseAutomation("The last stack upgrade was rolled back; acknowledge it before automatic upgrades resume.")
+	c.finish(operationID, StateRolledBack, "Upgrade failed and the previous Greenbone stack was restored.")
 	return nil
 }
 
@@ -581,8 +583,8 @@ func (c *Controller) recoverInterrupted(operation Operation) {
 			c.pauseAutomation("Interrupted stack upgrade could not be recovered.")
 			return
 		}
-		c.finish(operation.ID, StateRolledBack, "Interrupted upgrade recovered to the previous checkpoint.")
 		c.pauseAutomation("An interrupted stack upgrade was rolled back; acknowledge it before automation resumes.")
+		c.finish(operation.ID, StateRolledBack, "Interrupted upgrade recovered to the previous checkpoint.")
 		return
 	}
 	c.finish(operation.ID, StateDegraded, "An interrupted operation was stopped safely; run it again.")
@@ -591,6 +593,9 @@ func (c *Controller) recoverInterrupted(operation Operation) {
 func (c *Controller) phase(operationID string, state State, phase, detail string) {
 	c.mu.Lock()
 	if c.state.Active != nil && c.state.Active.ID == operationID {
+		if c.state.Active.Phase != phase || c.state.Active.PhaseStartedAt.IsZero() {
+			c.state.Active.PhaseStartedAt = c.now().UTC()
+		}
 		c.state.Active.State = state
 		c.state.Active.Phase = phase
 		c.state.Active.Detail = truncate(detail, 500)

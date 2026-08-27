@@ -172,7 +172,13 @@ func TestControllerRefreshesChangedFeeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if operation.PhaseStartedAt.IsZero() || !operation.PhaseStartedAt.Equal(operation.StartedAt) {
+		t.Fatalf("queued phase start = %s, operation start = %s", operation.PhaseStartedAt, operation.StartedAt)
+	}
 	finished := waitForTerminal(t, controller, operation.ID)
+	if finished.PhaseStartedAt.IsZero() {
+		t.Fatal("finished operation has no phase start")
+	}
 	if finished.State != StateSucceeded {
 		t.Fatalf("state = %q, want %q: %s", finished.State, StateSucceeded, finished.Detail)
 	}

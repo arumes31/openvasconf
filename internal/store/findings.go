@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	FindingScopeActive     = "active"
-	FindingScopeSuppressed = "suppressed"
+	FindingScopeActive        = "active"
+	FindingScopeSuppressed    = "suppressed"
+	maxCurrentFindingPageSize = 100000
 )
 
 // CurrentFinding is the latest successful occurrence of one task-scoped
@@ -151,7 +152,7 @@ func (s *Store) CurrentFindings(
 	}
 
 	pageSize := filter.PageSize
-	if pageSize < 1 || pageSize > 500 {
+	if pageSize < 1 || pageSize > maxCurrentFindingPageSize {
 		pageSize = 100
 	}
 	page := max(filter.Page, 1)

@@ -49,6 +49,8 @@ type Repository interface {
 	AnnotationsForTask(ctx context.Context, customerID, taskID string) (map[string]store.FindingAnnotation, error)
 	CurrentFindings(ctx context.Context, filter store.FindingQuery) ([]store.CurrentFinding, int, error)
 	CurrentFindingMetrics(ctx context.Context) (store.FindingMetrics, error)
+	OpenScanAlerts(ctx context.Context, limit int) ([]store.ScanAlert, error)
+	AcknowledgeScanAlert(ctx context.Context, alertID int64) error
 	UpdateHookwiseSettings(ctx context.Context, settings customer.HookwiseSettings) error
 }
 
@@ -159,6 +161,7 @@ func New(options Options) (*Server, error) {
 		},
 		"severityClass":    severityClass,
 		"importStateClass": importStateClass,
+		"cveURL":           cveURL,
 		"nextScan": func(value customer.Customer) string {
 			next, nextErr := value.NextSchedule(time.Now())
 			if nextErr != nil {
@@ -269,7 +272,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /customers/{id}/tasks/{kind}/{class}/{sequence}/stop", s.requireAuth(http.HandlerFunc(s.stopScan)))
 	mux.Handle("GET /reports", s.requireAuth(http.HandlerFunc(s.reportsList)))
 	mux.Handle("GET /findings", s.requireAuth(http.HandlerFunc(s.findingsList)))
+	mux.Handle("GET /findings/export.json", s.requireAuth(http.HandlerFunc(s.findingsJSONExport)))
 	mux.Handle("POST /findings/state", s.requireAuth(http.HandlerFunc(s.findingStateUpdate)))
+	mux.Handle("POST /scan-alerts/{id}/acknowledge", s.requireAuth(http.HandlerFunc(s.scanAlertAcknowledge)))
 	mux.Handle("POST /reports/refresh", s.requireAuth(http.HandlerFunc(s.reportsRefresh)))
 	mux.Handle("GET /reports/compare", s.requireAuth(http.HandlerFunc(s.reportCompare)))
 	mux.Handle("GET /reports/{id}", s.requireAuth(http.HandlerFunc(s.reportDetail)))

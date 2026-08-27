@@ -10,7 +10,7 @@
 </section>
 
 <section class="panel table-panel">
-  <div class="section-heading"><div><p class="eyebrow">LATEST SUCCESSFUL SNAPSHOTS</p><h2>{{.FindingTotal}} findings</h2></div><span class="badge">page {{.FindingPage}} / {{.FindingPages}}</span></div>
+  <div class="section-heading"><div><p class="eyebrow">LATEST SUCCESSFUL SNAPSHOTS</p><h2>{{.FindingTotal}} findings</h2></div><div class="button-row"><form method="get" action="/findings/export.json"><input type="hidden" name="customer" value="{{.FindingQuery.CustomerID}}"><input type="hidden" name="cid" value="{{.FindingQuery.CID}}"><input type="hidden" name="task" value="{{.FindingQuery.Task}}"><input type="hidden" name="host" value="{{.FindingQuery.Host}}"><input type="hidden" name="severity" value="{{.FindingQuery.Severity}}"><input type="hidden" name="scope" value="{{.FindingQuery.Scope}}"><input type="hidden" name="ticket" value="{{.FindingQuery.Ticket}}"><input type="hidden" name="lifecycle" value="{{.FindingQuery.Lifecycle}}"><button class="secondary" type="submit">Export JSON</button></form><span class="badge">page {{.FindingPage}} / {{.FindingPages}}</span></div></div>
   <form method="get" action="/findings" class="filter-bar filter-bar-wide">
     <label>Customer<select name="customer"><option value="">All customers</option>{{range .Customers}}<option value="{{.ID}}" {{if selected $.FindingQuery.CustomerID .ID}}selected{{end}}>{{.Name}}</option>{{end}}</select></label>
     <label>CID<input name="cid" value="{{.FindingQuery.CID}}" placeholder="routing id"></label>
@@ -25,7 +25,7 @@
   {{if .CurrentFindings}}<div class="table-scroll"><table class="findings-table"><thead><tr><th>Customer / task</th><th>Finding</th><th>Asset</th><th>Severity</th><th>Seen</th><th>Ticket</th><th>Action</th></tr></thead><tbody>
   {{range .CurrentFindings}}<tr>
     <td><strong>{{.CustomerName}}</strong><small>CID {{if .CID}}{{.CID}}{{else}}not configured{{end}}</small><small>{{.TaskName}}</small></td>
-    <td><strong>{{.Title}}</strong><small>{{.NVTOID}}</small><code>{{.Fingerprint}}</code></td>
+    <td><strong>{{.Title}}</strong><small>{{.NVTOID}}</small>{{if .CVEs}}<div class="tags">{{range .CVEs}}{{if cveURL .}}<a href="{{cveURL .}}" target="_blank" rel="noopener noreferrer">{{.}} ↗</a>{{else}}<span>{{.}}</span>{{end}}{{end}}</div>{{end}}<code>{{.Fingerprint}}</code></td>
     <td><strong>{{.Host}}</strong><small>{{.Port}}{{if .Location}} · {{.Location}}{{end}}</small></td>
     <td><strong class="threat-{{severityClass .Threat}}">{{printf "%.1f" .Severity}}</strong><small>{{.Threat}} · QOD {{.QOD}}%</small></td>
     <td><strong>{{.LastSeen.Format "2006-01-02 15:04"}}</strong><small><span class="badge badge-{{.Lifecycle}}">{{.Lifecycle}}</span> first {{.FirstSeen.Format "2006-01-02"}}</small><a href="/reports/{{.SnapshotID}}">Snapshot →</a></td>

@@ -105,24 +105,61 @@ if (syncingRows.length) {
 const updaterPanel = document.querySelector("[data-updater-status-url]");
 if (updaterPanel) {
   let updaterRefreshInFlight = false;
+  let updaterTimer = null;
+  let idleRefreshes = 0;
+  const activeDelay = 2000;
+  const warmIdleDelay = 10000;
+  const coldIdleDelay = 30000;
+
+  const renderPhaseElapsed = () => {
+    const activePanel = document.querySelector("[data-update-phase-start]");
+    const output = document.querySelector("[data-update-elapsed]");
+    if (!activePanel || !output) return;
+    const started = Date.parse(activePanel.dataset.updatePhaseStart);
+    if (Number.isNaN(started)) {
+      output.textContent = "unknown";
+      return;
+    }
+    const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    output.textContent = hours > 0 ? `${hours}h ${minutes}m ${remainder}s` :
+      (minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`);
+  };
+
+  const scheduleUpdaterRefresh = (delay) => {
+    window.clearTimeout(updaterTimer);
+    if (!document.hidden) updaterTimer = window.setTimeout(refreshUpdater, delay);
+  };
+
   const refreshUpdater = () => {
-    if (updaterRefreshInFlight) return;
+    if (document.hidden || updaterRefreshInFlight) return;
     updaterRefreshInFlight = true;
     fetch(updaterPanel.dataset.updaterStatusUrl, {headers: {"Accept": "application/json"}})
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Updater unavailable");
+        const active = Boolean(data.active);
+        idleRefreshes = active ? 0 : idleRefreshes + 1;
         document.querySelectorAll("[data-update-state]").forEach((element) => {
-          element.textContent = data.active ? data.active.state : "IDLE";
+          element.textContent = active ? data.active.state : "IDLE";
         });
         document.querySelectorAll("[data-update-phase]").forEach((element) => {
-          element.textContent = data.active ? data.active.phase : "no active mutation";
+          element.textContent = active ? data.active.phase : "no active mutation";
         });
         document.querySelectorAll("[data-update-detail]").forEach((element) => {
-          element.textContent = data.active ? data.active.detail : "";
+          element.textContent = active ? data.active.detail : "";
         });
+        const activePanel = document.querySelector("[data-update-phase-start]");
+        if (activePanel && active) {
+          activePanel.dataset.updatePhaseStart = data.active.phase_started_at || data.active.started_at;
+        }
+        renderPhaseElapsed();
+        scheduleUpdaterRefresh(active ? activeDelay : (idleRefreshes <= 3 ? warmIdleDelay : coldIdleDelay));
       })
       .catch(() => {
+        idleRefreshes++;
         document.querySelectorAll("[data-update-state]").forEach((element) => {
           element.textContent = "OFFLINE";
         });
@@ -132,10 +169,17 @@ if (updaterPanel) {
         document.querySelectorAll("[data-update-detail]").forEach((element) => {
           element.textContent = "";
         });
+        scheduleUpdaterRefresh(coldIdleDelay);
       })
       .finally(() => {
         updaterRefreshInFlight = false;
       });
   };
-  window.setInterval(refreshUpdater, 5000);
+  document.addEventListener("visibilitychange", () => {
+    window.clearTimeout(updaterTimer);
+    if (!document.hidden) refreshUpdater();
+  });
+  window.setInterval(renderPhaseElapsed, 1000);
+  renderPhaseElapsed();
+  refreshUpdater();
 }

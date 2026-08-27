@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"openvasconf/internal/gmp"
@@ -141,6 +142,10 @@ func (s *Server) probeHealth(ctx context.Context) healthStrip {
 }
 
 func summarizeFeeds(feeds []gmp.Feed) healthComponent {
+	return summarizeFeedsAt(feeds, time.Now())
+}
+
+func summarizeFeedsAt(feeds []gmp.Feed, now time.Time) healthComponent {
 	component := healthComponent{Name: "Feeds", State: "ok", Link: "/settings"}
 	syncing := 0
 	var oldest time.Time
@@ -152,16 +157,28 @@ func summarizeFeeds(feeds []gmp.Feed) healthComponent {
 			oldest = feed.UpdatedAt
 		}
 	}
+	if oldest.IsZero() {
+		component.State = "warning"
+		component.Detail = "feed timestamps unavailable"
+		component.Guidance = "Check whether Greenbone has completed its initial feed import."
+		return component
+	}
+	age := max(int(now.Sub(oldest).Hours()/24), 0)
+	stamp := oldest.Format("2006-01-02 15:04 MST")
 	switch {
-	case syncing > 0:
-		component.State = "degraded"
-		component.Detail = "feed synchronization in progress"
-	case !oldest.IsZero() && time.Since(oldest) > 8*24*time.Hour:
-		component.State = "degraded"
-		component.Detail = "feeds are older than 8 days"
+	case now.Sub(oldest) > 8*24*time.Hour:
+		component.State = "critical"
+		component.Detail = fmt.Sprintf("oldest feed %dd · %s", age, stamp)
 		component.Guidance = "Check the Greenbone feed sync containers."
+	case syncing > 0:
+		component.State = "warning"
+		component.Detail = fmt.Sprintf("syncing; oldest feed %dd · %s", age, stamp)
+	case now.Sub(oldest) > 5*24*time.Hour:
+		component.State = "warning"
+		component.Detail = fmt.Sprintf("oldest feed %dd · %s", age, stamp)
+		component.Guidance = "Feed age is approaching the eight-day SLA limit."
 	default:
-		component.Detail = "feeds current"
+		component.Detail = fmt.Sprintf("oldest feed %dd · %s", age, stamp)
 	}
 	return component
 }
@@ -174,7 +191,10 @@ func summarizeHealth(components []healthComponent) healthStrip {
 		case "down":
 			level = "red"
 			summary = component.Name + " unavailable"
-		case "degraded":
+		case "critical":
+			level = "red"
+			summary = component.Name + " critical"
+		case "degraded", "warning":
 			if level != "red" {
 				level = "amber"
 				summary = component.Name + " degraded"
