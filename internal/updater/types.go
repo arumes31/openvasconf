@@ -101,10 +101,11 @@ func (p Policy) Validate() error {
 }
 
 type Image struct {
-	Service    string `json:"service"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	ID         string `json:"id"`
+	Service       string `json:"service"`
+	Repository    string `json:"repository"`
+	Tag           string `json:"tag"`
+	ID            string `json:"id"`
+	containerName string
 }
 
 type Feed struct {
