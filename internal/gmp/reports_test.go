@@ -147,6 +147,16 @@ func TestClientReportMalformedStream(t *testing.T) {
 	}
 }
 
+func TestClientReportRejectsEmptyResponse(t *testing.T) {
+	t.Parallel()
+
+	client := fakeClient(t, []string{""}, nil)
+	_, err := client.Report(t.Context(), "report-1", reportLimits())
+	if err == nil || !strings.Contains(err.Error(), "get_reports returned an empty response") {
+		t.Fatalf("Report() error = %v, want explicit empty response error", err)
+	}
+}
+
 func TestClientReportToleratesMissingFields(t *testing.T) {
 	t.Parallel()
 
