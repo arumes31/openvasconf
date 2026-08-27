@@ -566,8 +566,8 @@ func (c *Controller) rollback(
 		c.pauseAutomation("The restored stack could not be verified; manual recovery is required.")
 		return errors.Join(cause, fmt.Errorf("verifying rollback: %w", err))
 	}
-	c.finish(operationID, StateRolledBack, "Upgrade failed and the previous Greenbone stack was restored.")
 	c.pauseAutomation("The last stack upgrade was rolled back; acknowledge it before automatic upgrades resume.")
+	c.finish(operationID, StateRolledBack, "Upgrade failed and the previous Greenbone stack was restored.")
 	return nil
 }
 
@@ -583,8 +583,8 @@ func (c *Controller) recoverInterrupted(operation Operation) {
 			c.pauseAutomation("Interrupted stack upgrade could not be recovered.")
 			return
 		}
-		c.finish(operation.ID, StateRolledBack, "Interrupted upgrade recovered to the previous checkpoint.")
 		c.pauseAutomation("An interrupted stack upgrade was rolled back; acknowledge it before automation resumes.")
+		c.finish(operation.ID, StateRolledBack, "Interrupted upgrade recovered to the previous checkpoint.")
 		return
 	}
 	c.finish(operation.ID, StateDegraded, "An interrupted operation was stopped safely; run it again.")
