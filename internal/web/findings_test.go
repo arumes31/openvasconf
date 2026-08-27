@@ -69,7 +69,9 @@ func TestFindingStateRequiresReason(t *testing.T) {
 		"fingerprint": {"v1:seeded"},
 		"state":       {store.RemediationResolved},
 	})
-	defer response.Body.Close()
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("close response body: %v", err)
+	}
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusBadRequest)
 	}

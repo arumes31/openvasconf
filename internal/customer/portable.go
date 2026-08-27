@@ -146,8 +146,12 @@ func ValidateCID(value string) error {
 		return errors.New("customer cid must contain at most 100 characters")
 	}
 	for _, char := range value {
-		if !(char >= 'a' && char <= 'z') && !(char >= 'A' && char <= 'Z') &&
-			!(char >= '0' && char <= '9') && !strings.ContainsRune("._:-", char) {
+		switch {
+		case char >= 'a' && char <= 'z':
+		case char >= 'A' && char <= 'Z':
+		case char >= '0' && char <= '9':
+		case strings.ContainsRune("._:-", char):
+		default:
 			return errors.New("customer cid may contain only letters, numbers, dot, underscore, colon, and hyphen")
 		}
 	}
