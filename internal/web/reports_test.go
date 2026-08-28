@@ -127,7 +127,7 @@ func seedReportSnapshot(t *testing.T, app reportTestApp) store.ReportSnapshot {
 	if err := app.repository.SaveReportSnapshot(ctx, snapshot, findings); err != nil {
 		t.Fatal(err)
 	}
-	listed, err := app.repository.ListReportSnapshots(ctx, "", 1)
+	listed, err := app.repository.ListReportSnapshots(ctx, value.ID, 1)
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("seeded snapshot lookup = %#v, %v", listed, err)
 	}

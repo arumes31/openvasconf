@@ -878,8 +878,7 @@ excludes these artifacts.
 
 ## License
 
-This repository currently has no `LICENSE` file. Do not assume permission to
-redistribute or reuse the code until the project owner adds an explicit license.
+This project is available under the [MIT License](LICENSE).
 
 ## Verified integration environment
 
