@@ -29,6 +29,7 @@ the desired configuration through GMP.
 - [Reconciliation and deletion](#reconciliation-and-deletion)
 - [Configuration reference](#configuration-reference)
 - [Operations](#operations)
+- [Hookwise ticket integration](#hookwise-ticket-integration)
 - [Security](#security)
 - [Backup, restore, and upgrades](#backup-restore-and-upgrades)
 - [Troubleshooting](#troubleshooting)
@@ -117,6 +118,11 @@ flowchart LR
     App --> Reconciler[Periodic reconciler]
     Reconciler -->|GMP over Unix socket| GVMD[Greenbone gvmd]
     GVMD --> Scanner[OpenVAS scanner]
+    GVMD -->|completed reports| ReportSync[Report snapshot sync]
+    ReportSync --> DB
+    DB --> TicketDispatcher[Durable ticket outbox]
+    TicketDispatcher -->|HTTPS and bearer token| Hookwise[Hookwise endpoint]
+    Hookwise --> ConnectWise[ConnectWise Manage]
     Reconciler --> DB
 ```
 
@@ -299,6 +305,8 @@ curl --fail http://127.0.0.1:8080/health/ready
 5. Choose the allowed weekdays and time window. Any weekday combination and any
    same-day start/end time between 00:00 and 23:59 is accepted.
 6. Save the global defaults.
+7. Optional: configure customer CIDs and the global Hookwise endpoint as
+   described in [Hookwise ticket integration](#hookwise-ticket-integration).
 
 Changing the global schedule policy does not silently move existing customer
 slots. Existing schedules remain stable and are marked as outside policy when
@@ -455,6 +463,12 @@ File-based secrets take precedence over direct values. The admin password must
 contain at least 12 characters. All configured durations must be positive, and
 the timezone must be a valid IANA name.
 
+The Hookwise encryption key protects the bearer token stored in SQLite. It is
+not the Hookwise bearer token and it is not an HMAC secret. Preserve the key with
+the database backup. Replacing or losing it makes the existing stored token
+undecryptable; after an intentional key rotation, restart `openvasconf`, enter
+the Hookwise bearer token again, save the settings, and test the connection.
+
 Run `openvasconf validate-config` to verify the same configuration and secret
 references used at startup without starting the HTTP server or connecting to
 SQLite or Greenbone. It prints every discovered problem, never prints secret
@@ -549,15 +563,6 @@ task-scoped fingerprint. Marking a row resolved or wont-fix suppresses it from
 current and future views until it is manually reopened; historical snapshots
 remain immutable.
 
-Hookwise ticket synchronization is configured in **Greenbone settings**. Add a
-CID to each customer, then configure the global webhook endpoint and bearer
-token. Findings with severity 7.0 or higher open tickets. Tickets close after a
-successful task snapshot no longer contains the finding, its severity falls
-below 7.0, or an operator marks it resolved/wont-fix. Configure the Hookwise
-endpoint with trigger field `$.state`, open value `open`, close value `closed`,
-and JSON mapping `"customer_id": "$.cid"`. Delivery uses a durable retrying
-outbox; missing CIDs are shown as routing blocks instead of being discarded.
-
 Authenticated JSON endpoints used by the web UI are:
 
 | Endpoint | Purpose |
@@ -589,6 +594,218 @@ docker compose -f deploy/greenbone-compose.yaml down
 
 Do not add `--volumes` unless you intentionally want to destroy the Greenbone
 feeds, databases, scan data, and the `openvasconf` SQLite volume.
+
+## Hookwise ticket integration
+
+[`Hookwise`](https://github.com/arumes31/hookwise) receives finding lifecycle
+events from `openvasconf` and creates, updates, or closes customer-routed
+ConnectWise Manage tickets. One global Hookwise endpoint is shared by all
+customers; the `cid` on each customer selects the ConnectWise company.
+
+### Ticket eligibility and lifecycle
+
+Ticket identity is the customer, managed task, and stable finding fingerprint.
+The ticket summary contains a shortened fingerprint plus host and port because
+Hookwise uses the final summary for duplicate detection and close-event lookup.
+
+| Current finding state | Ticket action |
+|---|---|
+| Present in the latest successful task snapshot, severity `>= 7.0`, active, and not resolved/wont-fix | Queue `state: open` if no open generation has been delivered. |
+| Eligible but customer CID is empty | Set ticket state to `blocked`; no webhook is sent. |
+| Missing from the next successful snapshot of the same task | Queue `state: closed`. |
+| Severity drops below `7.0` | Queue `state: closed`. |
+| Marked resolved or wont-fix | Hide it from the current view and queue `state: closed`. |
+| Classified as false positive or accepted risk through report annotation | Queue `state: closed` while that disposition is active. |
+| Reopened or becomes eligible again later | Start a new ticket generation and queue another `state: open`. |
+
+An interrupted or failed scan does not prove that a finding disappeared. Only a
+successfully imported newer snapshot can cause the absence transition. Historical
+report snapshots remain immutable when a current finding is suppressed or
+closed.
+
+### 1. Prepare the openvasconf encryption key
+
+The standard Compose files already mount
+`secrets/hookwise_encryption_key` through
+`OPENVASCONF_HOOKWISE_ENCRYPTION_KEY_FILE`. Create it before the first startup:
+
+```bash
+mkdir -p secrets
+openssl rand -base64 32 > secrets/hookwise_encryption_key
+chmod 600 secrets/hookwise_encryption_key
+```
+
+PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force secrets | Out-Null
+$key = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($key)
+Set-Content -NoNewline secrets/hookwise_encryption_key `
+  ([Convert]::ToBase64String($key))
+```
+
+The decoded value must be exactly 32 bytes. `openvasconf validate-config`
+validates the file without printing it. The key encrypts the Hookwise bearer
+token with AES-256-GCM before the token is written to SQLite. The UI never
+renders the stored token back to the browser.
+
+### 2. Create the Hookwise endpoint
+
+Deploy Hookwise and complete its ConnectWise connection first. In Hookwise,
+select **New Endpoint** and use this recipe:
+
+| Hookwise field | Recommended value for openvasconf |
+|---|---|
+| Endpoint Name | `openvasconf findings` |
+| Service Board | The board that should receive vulnerability tickets. |
+| Priority | A valid priority on that ConnectWise installation. Hookwise may also derive it from the mapped severity. |
+| Default Company | Optional safety fallback. Normal routing uses `$.cid`; openvasconf blocks events without a CID before delivery. |
+| Initial Status | A valid open status on the selected board. |
+| Close Status | A valid closed status such as `Completed` or `Closed`. |
+| Summary Prefix | Keep stable after tickets are opened. Hookwise includes it in duplicate and close matching. |
+| Trigger Field | `$.state` |
+| Open Value | `open` |
+| Close Value | `closed,connection_test` |
+| Bearer Token Authentication | Enabled. |
+| HMAC Secret | Leave empty; openvasconf authenticates with the bearer token and does not send `X-HookWise-Signature`. |
+| Trusted IPs | Optional. If enabled, allow the source address Hookwise sees after any reverse proxy. |
+| Endpoint state | Enabled and not left as a draft. |
+
+Hookwise accepts comma-separated trigger values. Including `connection_test` in
+the close values makes the openvasconf connection test a harmless close/no-op
+instead of a generic alert on Hookwise versions that process unmatched states.
+
+Set **JSON Mapping** to:
+
+```json
+{
+  "summary": "$.summary",
+  "description": "$.description",
+  "customer_id": "$.cid",
+  "severity": "$.severity"
+}
+```
+
+Do not map the Hookwise summary from `$.title`. NVT titles may change between
+feed versions, whereas the `$.summary` emitted by openvasconf is deliberately
+fingerprint-stable so the later close event can find the original ticket.
+
+Save the endpoint. Its edit page displays both values needed by openvasconf:
+
+- the endpoint URL, normally `https://hookwise.example/w/<endpoint-id>`;
+- the generated bearer token under **Token Management**.
+
+Copy the complete URL shown by Hookwise. Do not reconstruct it from older
+examples that use `/webhook/<id>`; current Hookwise routes and its endpoint form
+use `/w/<id>`. Token regeneration is immediate. If it is regenerated, update
+openvasconf before retrying queued events.
+
+### 3. Configure customer routing CIDs
+
+For every customer that should create tickets:
+
+1. Open the customer in `openvasconf`.
+2. Set **Hookwise customer CID** to the exact ConnectWise company identifier,
+   not the local openvasconf UUID or display name.
+3. Review and confirm the customer change.
+
+CIDs are optional globally, limited to 100 characters, and may contain letters,
+numbers, `.`, `_`, `:`, and `-`. An eligible High/Critical finding without a CID
+is retained with ticket state `blocked`. Adding the CID later causes the next
+ticket reconciliation pass to queue the open event; the finding is not lost.
+
+### 4. Connect openvasconf to Hookwise
+
+1. Log in to `openvasconf` and open **Greenbone**.
+2. In **Hookwise integration**, enter the complete `/w/<endpoint-id>` URL.
+3. Paste the Hookwise bearer token. It is write-only; leaving the field blank on
+   a later save preserves the stored token.
+4. Enable **ticket synchronization** and select **Save Hookwise settings**.
+5. Select **Test connection**.
+6. Check Hookwise **History** and confirm the `connection_test` event was
+   accepted without creating a ticket.
+7. Import or refresh a successful report containing an eligible finding and
+   verify the resulting ConnectWise ticket and company routing.
+
+The endpoint must be reachable from the `openvasconf` container. `localhost`
+inside that container refers to the container itself. When both applications
+share a Docker network, use the Hookwise service DNS name and port; otherwise use
+a routed HTTPS hostname. Hookwise redirects are not followed, embedded URL
+credentials are rejected, TLS must be version 1.2 or newer, and private/self-
+signed certificate authorities must be trusted by the container. There is no
+insecure TLS switch.
+
+### Webhook payload
+
+An open event resembles:
+
+```json
+{
+  "event_id": "customer-id:task-id:v1:fingerprint:1:open",
+  "state": "open",
+  "cid": "CUSTOMER-CID",
+  "finding_key": "customer-id:task-id:v1:fingerprint",
+  "customer": "Example customer",
+  "customer_id": "customer-id",
+  "task": "Example_PrivateIP_Task1",
+  "task_id": "task-id",
+  "fingerprint": "v1:fingerprint",
+  "summary": "[OpenVAS] Finding v1:fingerpri on 10.20.30.40:443/tcp",
+  "description": "Finding title and remediation context",
+  "title": "Finding title",
+  "host": "10.20.30.40",
+  "port": "443/tcp",
+  "severity": 8.8,
+  "cves": ["CVE-2026-1234"],
+  "remediation": "Install the fixed version",
+  "resolution": "",
+  "remediation_state": "open",
+  "report_path": "/reports/123"
+}
+```
+
+A close event uses the same stable finding identity and summary, changes
+`state` to `closed`, and includes the current resolution/remediation state.
+`report_path` is relative to the openvasconf UI and is not automatically an
+externally reachable URL.
+
+### Delivery guarantees and monitoring
+
+- Events are first committed to the SQLite outbox; application restarts do not
+  discard them.
+- Reconciliation and delivery run on changes and every 30 seconds, with at most
+  20 due events handled per pass in creation order.
+- Any HTTP `2xx` response marks the webhook event delivered. Redirects and all
+  other statuses are failures. At most 4 KiB of an error response is retained.
+- Failed events retry after 1, 2, 4, 8 minutes and so on, capped at 256 minutes.
+  **Retry failed events** makes all pending failures immediately eligible.
+- The settings page shows pending, retrying, and last-delivered state. The
+  Findings page shows `blocked`, `queued_open`, `open`, `queued_close`, `closed`,
+  and `failed` per finding.
+- Rotating the bearer token does not rewrite queued payloads. Save the new token
+  in openvasconf and then select **Retry failed events**.
+
+Hookwise normally returns `202 Accepted` after queuing work. That confirms
+ingestion and authentication, not successful asynchronous ConnectWise ticket
+creation. openvasconf therefore reports webhook delivery health, while Hookwise
+**History**, worker logs, and ConnectWise remain authoritative for downstream
+processing failures.
+
+### Hookwise troubleshooting
+
+| Symptom | Check |
+|---|---|
+| `ticket integration incomplete` | Confirm the 32-byte deployment encryption key, endpoint URL, saved bearer token, and enabled checkbox. |
+| Connection test fails | Test DNS and TCP/TLS reachability from the openvasconf container; check the `/w/<id>` URL, bearer token, Hookwise trusted-IP rule, certificate chain, and redirects. |
+| Connection test creates a ticket | Add `connection_test` to Hookwise **Close Value** or add an equivalent drop routing rule for `$.state`. |
+| Finding shows `blocked` | Set a valid CID on the customer and save the reviewed customer change. |
+| Finding shows `failed` or settings show retrying events | Inspect openvasconf logs for HTTP status/diagnostic, correct the endpoint or token, then select **Retry failed events**. |
+| openvasconf says delivered but no ticket exists | Inspect Hookwise History and worker logs. A `2xx`/`202` only confirms ingestion; verify ConnectWise board, status, priority, company ID, and API permissions. |
+| Ticket is assigned to the wrong company | Ensure JSON mapping contains `"customer_id": "$.cid"` and the openvasconf CID exactly matches the ConnectWise company identifier. |
+| Ticket does not close | Verify trigger `$.state`, close value `closed`, a valid Hookwise Close Status, and an unchanged summary prefix. Check whether the ConnectWise ticket summary was edited manually. |
+| Duplicate tickets appear | Keep the JSON summary mapping and Hookwise prefix stable; verify Hookwise can still query the original open ticket. |
+| Stored token becomes undecryptable after restart | Restore the matching encryption key or enter the Hookwise token again under the new key and save. |
 
 ## Security
 
@@ -723,6 +940,8 @@ gofmt -w $(find . -name '*.go' -not -path './.git/*')
 go vet ./...
 go test -shuffle=on ./...
 go test -race ./...
+go test -covermode=atomic -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
 docker build -t openvasconf:test .
 docker compose -f deploy/greenbone-compose.yaml config
 ```
@@ -736,7 +955,9 @@ gofmt -w (rg --files -g '*.go')
 The test suite uses fake GMP connections and temporary SQLite databases; it does
 not require a live scanner. A live test deployment is still required to validate
 feed-dependent objects, socket permissions, routing, schedules, and real scan
-execution.
+execution. The repository test suite is maintained at the recommended 70%
+statement-coverage level; use the coverage commands above to verify the exact
+value for the checked-out revision.
 
 ### Frontend asset
 
