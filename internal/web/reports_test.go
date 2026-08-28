@@ -127,11 +127,17 @@ func seedReportSnapshot(t *testing.T, app reportTestApp) store.ReportSnapshot {
 	if err := app.repository.SaveReportSnapshot(ctx, snapshot, findings); err != nil {
 		t.Fatal(err)
 	}
-	listed, err := app.repository.ListReportSnapshots(ctx, "", 1)
-	if err != nil || len(listed) != 1 {
-		t.Fatalf("seeded snapshot lookup = %#v, %v", listed, err)
+	listed, err := app.repository.ListReportSnapshots(ctx, "", 100)
+	if err != nil {
+		t.Fatalf("seeded snapshot lookup: %v", err)
 	}
-	return listed[0]
+	for _, stored := range listed {
+		if stored.ReportID == snapshot.ReportID {
+			return stored
+		}
+	}
+	t.Fatalf("seeded snapshot %q not found", snapshot.ReportID)
+	return store.ReportSnapshot{}
 }
 
 func TestReportsListRequiresAuth(t *testing.T) {

@@ -131,7 +131,15 @@ func TestImportTokenValidation(t *testing.T) {
 		{name: "missing parts", token: func() string { return "invalid" }},
 		{name: "bad payload encoding", token: func() string { return "!.AA" }},
 		{name: "bad signature encoding", token: func() string { return "AA.!" }},
-		{name: "wrong signature", token: func() string { return valid[:len(valid)-1] + "A" }},
+		{name: "wrong signature", token: func() string {
+			parts := strings.Split(valid, ".")
+			replacement := "A"
+			if parts[1][0] == 'A' {
+				replacement = "B"
+			}
+			parts[1] = replacement + parts[1][1:]
+			return strings.Join(parts, ".")
+		}},
 		{name: "expired", token: func() string {
 			token, signErr := server.signImport(importEnvelope{Document: document, ExpiresAt: time.Now().Add(-time.Minute)})
 			if signErr != nil {
