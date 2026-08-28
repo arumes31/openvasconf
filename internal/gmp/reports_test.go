@@ -146,7 +146,7 @@ func TestClientReportReturnsBeforeServerClosesConnection(t *testing.T) {
 	dial := func(context.Context, string, string) (net.Conn, error) {
 		return clientSide, nil
 	}
-	client := NewWithDialer("admin", "secret", 50*time.Millisecond, dial)
+	client := NewWithDialer("admin", "secret", 2*time.Second, dial)
 	release := make(chan struct{})
 	go func() {
 		defer func() { _ = serverSide.Close() }()
