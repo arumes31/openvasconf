@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           scanner_bin="$(go env GOBIN)"
           if [[ -z "$scanner_bin" ]]; then
             scanner_bin="$(go env GOPATH)/bin"
