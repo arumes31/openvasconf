@@ -668,11 +668,11 @@ select **New Endpoint** and use this recipe:
 |---|---|
 | Endpoint Name | `openvasconf findings` |
 | Service Board | The board that should receive vulnerability tickets. |
-| Priority | A valid default priority on that ConnectWise installation. The JSON mapping below overrides it with the named priority emitted in `$.severity`. |
+| Priority | A valid default priority on that ConnectWise installation. The JSON mapping below overrides it through Hookwise's `priority` field with the named priority emitted in `$.severity`. |
 | Default Company | Optional safety fallback. Normal routing sends the exact name from `$.connectwise_customer_name` through Hookwise Customer Mapping; create an explicit mapping for every ticket-enabled customer. |
 | Initial Status | A valid open status on the selected board. |
 | Close Status | A valid closed status such as `Completed` or `Closed`. |
-| Summary Prefix | Keep stable after tickets are opened. Hookwise includes it in duplicate and close matching. |
+| Summary Prefix | `[OpenVAS]` is recommended. Keep it unchanged after tickets are opened because Hookwise includes it in duplicate and close matching. |
 | Trigger Field | `$.state` |
 | Open Value | `open` |
 | Close Value | `closed,connection_test` |
@@ -692,8 +692,7 @@ Set **JSON Mapping** to:
   "summary": "$.summary",
   "description": "$.description",
   "customer_id": "$.connectwise_customer_name",
-  "severity": "$.severity",
-  "severitysource": "$.severitysource"
+  "priority": "$.severity"
 }
 ```
 
@@ -702,11 +701,34 @@ is the exact ConnectWise customer name. In Hookwise **Customer Mapping**, map
 each emitted name to the intended Hookwise/ConnectWise customer. Keep this
 mapping stable for the full open/close lifecycle. `openvasconf` emits `P2-High`
 for severity `7.0` through `8.49` and `P1-Critical` for severity `8.5` and
-above. The original numeric score is retained in `severitysource`.
+above. Those names must exist as priorities in the target ConnectWise instance.
+
+The enriched Greenbone content is already assembled into `$.description`, so
+the mapping above produces the complete readable ticket without additional
+JSON mapping entries. Hookwise only applies its supported destination keys;
+payload keys such as `nvt_oid`, `cves`, `cvss_vector`, `qod`, `evidence`, and
+`references` remain available to routing rules and diagnostics but are not
+ConnectWise ticket fields by themselves. Do not add
+`"severitysource": "$.severitysource"`: `severitysource` is not a Hookwise
+destination key. Also do not map the numeric `$.severitysource` to Hookwise
+`severity`, or the narrative `$.impact` to Hookwise `impact`, unless the target
+ConnectWise installation explicitly accepts those exact values. The numeric
+Greenbone score and narrative impact are already preserved in the description.
 
 Do not map the Hookwise summary from `$.title`. NVT titles may change between
-feed versions, whereas the `$.summary` emitted by openvasconf is deliberately
-fingerprint-stable so the later close event can find the original ticket.
+feed versions. The `$.summary` emitted for an open event combines the NVT title,
+asset, and a shortened stable fingerprint, for example:
+
+```text
+OpenSSH Weak Encryption on 10.20.30.40:22/tcp [v1:fingerpri]
+```
+
+With the recommended Hookwise prefix, the final ConnectWise ticket name is
+`[OpenVAS] OpenSSH Weak Encryption on 10.20.30.40:22/tcp [v1:fingerpri]`.
+`openvasconf` stores that mapped summary in the durable open event and reuses it
+verbatim for the matching close event. A later Greenbone feed title change
+therefore cannot break close lookup. Keep both the JSON summary mapping and the
+Hookwise Summary Prefix unchanged for the ticket's lifecycle.
 
 Save the endpoint. Its edit page displays both values needed by openvasconf:
 
@@ -773,8 +795,8 @@ An open event resembles:
   "task": "Example_PrivateIP_Task1",
   "task_id": "task-id",
   "fingerprint": "v1:fingerprint",
-  "summary": "[OpenVAS] Finding v1:fingerpri on 10.20.30.40:443/tcp",
-  "description": "Finding title and remediation context",
+  "summary": "TLS vulnerability on 10.20.30.40:443/tcp [v1:fingerpri]",
+  "description": "Risk details, Greenbone evidence, remediation, references, and scan context",
   "title": "Finding title",
   "host": "10.20.30.40",
   "port": "443/tcp",

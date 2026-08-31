@@ -188,13 +188,13 @@ func enqueueHookwiseTx(
 	generation int,
 ) error {
 	findingKey := value.CustomerID + ":" + value.TaskID + ":" + value.Fingerprint
-	shortKey := value.Fingerprint
-	if len(shortKey) > 12 {
-		shortKey = shortKey[:12]
+	// Hookwise deduplicates and closes by summary. New generations get a readable
+	// title; close events reuse the exact summary stored in that generation's
+	// open payload so a later Greenbone title change cannot break matching.
+	summary, err := hookwiseSummaryTx(ctx, tx, value, eventType, generation)
+	if err != nil {
+		return err
 	}
-	// Hookwise deduplicates by summary, so it must use only fingerprint-stable
-	// fields. The mutable NVT title remains available in the payload/body.
-	summary := fmt.Sprintf("[OpenVAS] Finding %s on %s:%s", shortKey, value.Host, value.Port)
 	description := hookwiseDescription(value)
 	payload, err := json.Marshal(map[string]any{
 		"event_id":                  fmt.Sprintf("%s:%d:%s", findingKey, generation, eventType),
@@ -263,6 +263,57 @@ func enqueueHookwiseTx(
 		return fmt.Errorf("updating queued hookwise state: %w", err)
 	}
 	return nil
+}
+
+const maxHookwiseMappedSummaryLength = 90
+
+func hookwiseSummaryTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	value ticketCandidate,
+	eventType string,
+	generation int,
+) (string, error) {
+	if eventType == "closed" {
+		var encoded []byte
+		err := tx.QueryRowContext(ctx, `
+			SELECT payload FROM hookwise_outbox
+			WHERE customer_id = ? AND task_id = ? AND fingerprint = ?
+			  AND generation = ? AND event_type = 'open'
+			ORDER BY id DESC LIMIT 1`,
+			value.CustomerID, value.TaskID, value.Fingerprint, generation,
+		).Scan(&encoded)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("loading open Hookwise summary: %w", err)
+		}
+		if err == nil {
+			var openPayload struct {
+				Summary string `json:"summary"`
+			}
+			if json.Unmarshal(encoded, &openPayload) == nil && strings.TrimSpace(openPayload.Summary) != "" {
+				return openPayload.Summary, nil
+			}
+		}
+	}
+	return newHookwiseSummary(value), nil
+}
+
+func newHookwiseSummary(value ticketCandidate) string {
+	shortKey := value.Fingerprint
+	if len(shortKey) > 12 {
+		shortKey = shortKey[:12]
+	}
+	asset := boundedTicketText(value.Host+":"+value.Port, 48)
+	suffix := " on " + asset + " [" + shortKey + "]"
+	title := strings.TrimSpace(value.Title)
+	if title == "" {
+		title = "Security finding"
+	}
+	available := maxHookwiseMappedSummaryLength - len([]rune(suffix))
+	if available < 1 {
+		return boundedTicketText("Finding ["+shortKey+"]", maxHookwiseMappedSummaryLength)
+	}
+	return boundedTicketText(title, available) + suffix
 }
 
 const maxHookwiseDescriptionLength = 12000

@@ -116,6 +116,78 @@ func TestHookwiseDescriptionBoundsVerboseGreenboneSections(t *testing.T) {
 	}
 }
 
+func TestHookwiseSummaryIsReadableAndStableAcrossTitleChanges(t *testing.T) {
+	repository := openTestStore(t)
+	value := testCustomer(t, "stable-summary", []string{"10.61.0.1"})
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
+	if err := repository.CreateCustomer(t.Context(), value); err != nil {
+		t.Fatalf("CreateCustomer() error = %v", err)
+	}
+	firstEnd := time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC)
+	firstSnapshot := ReportSnapshot{
+		ReportID: "summary-report-1", TaskID: "task-1", TaskName: "Private scan",
+		CustomerID: value.ID, ScanEnd: firstEnd, Status: "Done",
+	}
+	finding := FindingSnapshot{
+		Fingerprint: "v1:stable-summary", Title: "OpenSSH Weak Encryption",
+		Host: "10.61.0.5", Port: "22/tcp", Severity: 9.0, Threat: "High",
+	}
+	if err := repository.SaveReportSnapshot(t.Context(), firstSnapshot, []FindingSnapshot{finding}); err != nil {
+		t.Fatalf("SaveReportSnapshot(first) error = %v", err)
+	}
+	if err := repository.UpdateHookwiseSettings(t.Context(), customer.HookwiseSettings{
+		Enabled: true, Endpoint: "https://hookwise.test/webhook", TokenCipher: "cipher",
+	}); err != nil {
+		t.Fatalf("UpdateHookwiseSettings() error = %v", err)
+	}
+	if err := repository.ReconcileHookwiseOutbox(t.Context()); err != nil {
+		t.Fatalf("ReconcileHookwiseOutbox(open) error = %v", err)
+	}
+	events, err := repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("PendingHookwiseEvents(open) = %#v, %v", events, err)
+	}
+	var openPayload struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(events[0].Payload, &openPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(openPayload.Summary, finding.Title) ||
+		!strings.Contains(openPayload.Summary, finding.Host+":"+finding.Port) ||
+		!strings.Contains(openPayload.Summary, "v1:stable-su") {
+		t.Fatalf("readable open summary = %q", openPayload.Summary)
+	}
+	if err := repository.MarkHookwiseDelivered(t.Context(), events[0], 202); err != nil {
+		t.Fatalf("MarkHookwiseDelivered() error = %v", err)
+	}
+
+	secondSnapshot := firstSnapshot
+	secondSnapshot.ReportID = "summary-report-2"
+	secondSnapshot.ScanEnd = firstEnd.Add(time.Hour)
+	finding.Title = "Renamed by a later Greenbone feed"
+	finding.Severity = 6.9
+	if err := repository.SaveReportSnapshot(t.Context(), secondSnapshot, []FindingSnapshot{finding}); err != nil {
+		t.Fatalf("SaveReportSnapshot(second) error = %v", err)
+	}
+	if err := repository.ReconcileHookwiseOutbox(t.Context()); err != nil {
+		t.Fatalf("ReconcileHookwiseOutbox(closed) error = %v", err)
+	}
+	events, err = repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 || events[0].EventType != "closed" {
+		t.Fatalf("PendingHookwiseEvents(closed) = %#v, %v", events, err)
+	}
+	var closePayload struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(events[0].Payload, &closePayload); err != nil {
+		t.Fatal(err)
+	}
+	if closePayload.Summary != openPayload.Summary {
+		t.Errorf("close summary = %q, want original %q", closePayload.Summary, openPayload.Summary)
+	}
+}
+
 func TestReconcileHookwiseOutboxMapsSeverityToConnectWisePriority(t *testing.T) {
 	tests := []struct {
 		name             string
