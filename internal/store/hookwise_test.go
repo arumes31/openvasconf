@@ -3,11 +3,118 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"openvasconf/internal/customer"
 )
+
+func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
+	repository := openTestStore(t)
+	value := testCustomer(t, "greenbone-details", []string{"10.60.0.1"})
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
+	if err := repository.CreateCustomer(t.Context(), value); err != nil {
+		t.Fatalf("CreateCustomer() error = %v", err)
+	}
+	scanEnd := time.Date(2026, 8, 31, 15, 30, 0, 0, time.UTC)
+	snapshot := ReportSnapshot{
+		ReportID: "greenbone-report-1", TaskID: "task-1", TaskName: "Private scan",
+		CustomerID: value.ID, ScanStart: scanEnd.Add(-time.Hour), ScanEnd: scanEnd,
+		Status: "Done",
+	}
+	finding := FindingSnapshot{
+		Fingerprint: "v1:greenbone", NVTOID: "1.3.6.1.4.1.25623.1.0.100001",
+		Title: "OpenSSH Weak Encryption", Host: "10.60.0.5", Port: "22/tcp",
+		Location: "SSH service", Severity: 9.8, Threat: "High", QOD: 80,
+		CVEs:        []string{"CVE-2021-1234", "CVE-2024-9999"},
+		Remediation: "Install the vendor-fixed OpenSSH release.",
+		Evidence:    "The remote SSH banner advertises legacy encryption algorithms.",
+		CVSSVector:  "AV:N/AC:L/Au:N/C:P/I:P/A:P",
+		Summary:     "Weak SSH encryption algorithms are enabled.",
+		Insight:     "The scanner negotiated a legacy cipher.",
+		Impact:      "An attacker may weaken transport confidentiality.",
+		Affected:    "OpenSSH before the fixed release.", SolutionType: "VendorFix",
+		References: []string{"url: https://greenbone.example/nvt"},
+	}
+	if err := repository.SaveReportSnapshot(t.Context(), snapshot, []FindingSnapshot{finding}); err != nil {
+		t.Fatalf("SaveReportSnapshot() error = %v", err)
+	}
+	if err := repository.UpdateHookwiseSettings(t.Context(), customer.HookwiseSettings{
+		Enabled: true, Endpoint: "https://hookwise.test/webhook", TokenCipher: "cipher",
+	}); err != nil {
+		t.Fatalf("UpdateHookwiseSettings() error = %v", err)
+	}
+	if err := repository.ReconcileHookwiseOutbox(t.Context()); err != nil {
+		t.Fatalf("ReconcileHookwiseOutbox() error = %v", err)
+	}
+	events, err := repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("PendingHookwiseEvents() = %#v, %v", events, err)
+	}
+	var payload struct {
+		Description       string   `json:"description"`
+		NVTOID            string   `json:"nvt_oid"`
+		Threat            string   `json:"threat"`
+		QOD               int      `json:"qod"`
+		Location          string   `json:"location"`
+		CVSSVector        string   `json:"cvss_vector"`
+		NVTSummary        string   `json:"nvt_summary"`
+		Evidence          string   `json:"evidence"`
+		Insight           string   `json:"insight"`
+		Impact            string   `json:"impact"`
+		Affected          string   `json:"affected"`
+		SolutionType      string   `json:"solution_type"`
+		References        []string `json:"references"`
+		GreenboneReportID string   `json:"greenbone_report_id"`
+		ScanEnd           string   `json:"scan_end"`
+	}
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	for _, expected := range []string{
+		"Risk details", "CVSS score: 9.8", "CVSS vector: AV:N/AC:L/Au:N/C:P/I:P/A:P",
+		"Quality of detection: 80%", "CVEs: CVE-2021-1234, CVE-2024-9999",
+		"Evidence", finding.Evidence, "Technical insight", finding.Insight,
+		"Impact", finding.Impact, "Affected", finding.Affected,
+		"Remediation", finding.Remediation, "Greenbone context", finding.NVTOID,
+	} {
+		if !strings.Contains(payload.Description, expected) {
+			t.Errorf("description missing %q:\n%s", expected, payload.Description)
+		}
+	}
+	if payload.NVTOID != finding.NVTOID || payload.Threat != finding.Threat ||
+		payload.QOD != finding.QOD || payload.Location != finding.Location ||
+		payload.CVSSVector != finding.CVSSVector || payload.NVTSummary != finding.Summary ||
+		payload.Evidence != finding.Evidence || payload.Insight != finding.Insight ||
+		payload.Impact != finding.Impact || payload.Affected != finding.Affected ||
+		payload.SolutionType != finding.SolutionType || len(payload.References) != 1 ||
+		payload.GreenboneReportID != snapshot.ReportID || payload.ScanEnd == "" {
+		t.Errorf("structured Greenbone payload = %#v", payload)
+	}
+}
+
+func TestHookwiseDescriptionBoundsVerboseGreenboneSections(t *testing.T) {
+	verbose := strings.Repeat("Greenbone detail ", 2000)
+	description := hookwiseDescription(ticketCandidate{
+		Title: "Verbose finding", CustomerName: "Customer", TaskName: "Task",
+		Host: "10.60.0.5", Port: "22/tcp", Severity: 9.8,
+		NVTOID: "1.3.6.1.4.1.25623.1.0.100001", GreenboneReportID: "report-1",
+		Remediation: verbose + " required remediation", NVTSummary: verbose,
+		Evidence: verbose, Insight: verbose, Impact: verbose, Affected: verbose,
+		References: []string{verbose},
+	})
+	if length := len([]rune(description)); length > maxHookwiseDescriptionLength {
+		t.Fatalf("description length = %d, want <= %d", length, maxHookwiseDescriptionLength)
+	}
+	for _, expected := range []string{
+		"Risk details", "Remediation", "Greenbone context", "NVT OID:", "Report ID:",
+	} {
+		if !strings.Contains(description, expected) {
+			t.Errorf("bounded description missing %q", expected)
+		}
+	}
+}
 
 func TestReconcileHookwiseOutboxMapsSeverityToConnectWisePriority(t *testing.T) {
 	tests := []struct {

@@ -42,6 +42,20 @@ type ticketCandidate struct {
 	Severity                float64
 	CVEs                    string
 	Remediation             string
+	NVTOID                  string
+	Location                string
+	Threat                  string
+	QOD                     int
+	Evidence                string
+	CVSSVector              string
+	NVTSummary              string
+	Insight                 string
+	Impact                  string
+	Affected                string
+	SolutionType            string
+	References              []string
+	GreenboneReportID       string
+	ScanEnd                 string
 	SnapshotID              int64
 	Present                 bool
 	Disposition             string
@@ -79,7 +93,11 @@ func (s *Store) ReconcileHookwiseOutbox(ctx context.Context) error {
 		SELECT s.customer_id, c.name, c.connectwise_customer_name,
 		       s.task_id, r.task_name,
 		       s.fingerprint, f.title, f.host, f.port, s.severity, f.cves,
-		       f.remediation, s.last_snapshot_id, s.present, s.disposition,
+		       f.remediation, f.nvt_oid, f.location, f.threat, f.qod,
+		       f.evidence, f.cvss_vector, f.summary, f.insight, f.impact,
+		       f.affected, f.solution_type, f.nvt_references,
+		       r.report_id, r.scan_end_at,
+		       s.last_snapshot_id, s.present, s.disposition,
 		       s.remediation_state, s.justification,
 		       s.ticket_desired_open, s.ticket_generation
 		FROM finding_states s
@@ -94,16 +112,24 @@ func (s *Store) ReconcileHookwiseOutbox(ctx context.Context) error {
 	candidates := make([]ticketCandidate, 0)
 	for rows.Next() {
 		var value ticketCandidate
+		var references string
 		if err := rows.Scan(
 			&value.CustomerID, &value.CustomerName,
 			&value.ConnectWiseCustomerName, &value.TaskID,
 			&value.TaskName, &value.Fingerprint, &value.Title, &value.Host,
 			&value.Port, &value.Severity, &value.CVEs, &value.Remediation,
+			&value.NVTOID, &value.Location, &value.Threat, &value.QOD,
+			&value.Evidence, &value.CVSSVector, &value.NVTSummary,
+			&value.Insight, &value.Impact, &value.Affected, &value.SolutionType,
+			&references, &value.GreenboneReportID, &value.ScanEnd,
 			&value.SnapshotID, &value.Present, &value.Disposition,
 			&value.RemediationState, &value.Justification,
 			&value.DesiredOpen, &value.Generation,
 		); err != nil {
 			return closeRows(rows, "hookwise candidates query", fmt.Errorf("scanning hookwise candidate: %w", err))
+		}
+		if err := json.Unmarshal([]byte(references), &value.References); err != nil {
+			return closeRows(rows, "hookwise candidates query", fmt.Errorf("decoding hookwise candidate references: %w", err))
 		}
 		candidates = append(candidates, value)
 	}
@@ -169,11 +195,7 @@ func enqueueHookwiseTx(
 	// Hookwise deduplicates by summary, so it must use only fingerprint-stable
 	// fields. The mutable NVT title remains available in the payload/body.
 	summary := fmt.Sprintf("[OpenVAS] Finding %s on %s:%s", shortKey, value.Host, value.Port)
-	description := fmt.Sprintf(
-		"%s\n\nCustomer: %s\nTask: %s\nAsset: %s:%s\nSeverity: %.1f\n\nRemediation:\n%s",
-		value.Title, value.CustomerName, value.TaskName, value.Host, value.Port,
-		value.Severity, value.Remediation,
-	)
+	description := hookwiseDescription(value)
 	payload, err := json.Marshal(map[string]any{
 		"event_id":                  fmt.Sprintf("%s:%d:%s", findingKey, generation, eventType),
 		"state":                     eventType,
@@ -193,6 +215,20 @@ func enqueueHookwiseTx(
 		"severitysource":            value.Severity,
 		"cves":                      splitCVEs(value.CVEs),
 		"remediation":               value.Remediation,
+		"nvt_oid":                   value.NVTOID,
+		"threat":                    value.Threat,
+		"qod":                       value.QOD,
+		"location":                  value.Location,
+		"cvss_vector":               value.CVSSVector,
+		"nvt_summary":               value.NVTSummary,
+		"evidence":                  value.Evidence,
+		"insight":                   value.Insight,
+		"impact":                    value.Impact,
+		"affected":                  value.Affected,
+		"solution_type":             value.SolutionType,
+		"references":                value.References,
+		"greenbone_report_id":       value.GreenboneReportID,
+		"scan_end":                  value.ScanEnd,
 		"resolution":                value.Justification,
 		"remediation_state":         value.RemediationState,
 		"report_path":               fmt.Sprintf("/reports/%d", value.SnapshotID),
@@ -227,6 +263,86 @@ func enqueueHookwiseTx(
 		return fmt.Errorf("updating queued hookwise state: %w", err)
 	}
 	return nil
+}
+
+const maxHookwiseDescriptionLength = 12000
+
+func hookwiseDescription(value ticketCandidate) string {
+	sections := make([]string, 0, 10)
+	if title := boundedTicketText(value.Title, 300); title != "" {
+		sections = append(sections, title)
+	}
+	risk := []string{fmt.Sprintf("CVSS score: %.1f", value.Severity)}
+	if value.Threat != "" {
+		risk = append(risk, "Threat: "+value.Threat)
+	}
+	if value.CVSSVector != "" {
+		risk = append(risk, "CVSS vector: "+value.CVSSVector)
+	}
+	if value.QOD > 0 {
+		risk = append(risk, fmt.Sprintf("Quality of detection: %d%%", value.QOD))
+	}
+	if cves := splitCVEs(value.CVEs); len(cves) > 0 {
+		risk = append(risk, "CVEs: "+strings.Join(cves, ", "))
+	}
+	sections = append(sections, "Risk details\n"+boundedTicketText(strings.Join(risk, "\n"), 1600))
+	appendSection := func(heading, content string, limit int) {
+		if content = boundedTicketText(content, limit); content != "" {
+			sections = append(sections, heading+"\n"+content)
+		}
+	}
+	appendSection("Greenbone summary", value.NVTSummary, 800)
+	appendSection("Evidence", value.Evidence, 1800)
+	appendSection("Technical insight", value.Insight, 1200)
+	appendSection("Impact", value.Impact, 900)
+	appendSection("Affected", value.Affected, 900)
+	remediation := strings.TrimSpace(value.Remediation)
+	if value.SolutionType != "" {
+		if remediation != "" {
+			remediation += "\n"
+		}
+		remediation += "Solution type: " + value.SolutionType
+	}
+	appendSection("Remediation", remediation, 1800)
+	if len(value.References) > 0 {
+		appendSection("References", "- "+strings.Join(value.References, "\n- "), 800)
+	}
+	contextLines := []string{
+		"Customer: " + value.CustomerName,
+		"Task: " + value.TaskName,
+		"Asset: " + value.Host + ":" + value.Port,
+	}
+	if value.Location != "" {
+		contextLines = append(contextLines, "Location: "+value.Location)
+	}
+	if value.NVTOID != "" {
+		contextLines = append(contextLines, "NVT OID: "+value.NVTOID)
+	}
+	if value.GreenboneReportID != "" {
+		contextLines = append(contextLines, "Report ID: "+value.GreenboneReportID)
+	}
+	if value.ScanEnd != "" {
+		contextLines = append(contextLines, "Scan completed: "+value.ScanEnd)
+	}
+	sections = append(sections, "Greenbone context\n"+boundedTicketText(strings.Join(contextLines, "\n"), 1000))
+	description := strings.Join(sections, "\n\n")
+	runes := []rune(description)
+	if len(runes) > maxHookwiseDescriptionLength {
+		description = string(runes[:maxHookwiseDescriptionLength])
+	}
+	return description
+}
+
+func boundedTicketText(value string, maxRunes int) string {
+	value = strings.TrimSpace(value)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 func (s *Store) PendingHookwiseEvents(
@@ -398,11 +514,15 @@ func (s *Store) RecreateHookwiseFinding(
 	defer func() { _ = tx.Rollback() }()
 
 	var value ticketCandidate
-	err = tx.QueryRowContext(ctx, `
+	row := tx.QueryRowContext(ctx, `
 		SELECT s.customer_id, c.name, c.connectwise_customer_name,
 		       s.task_id, r.task_name,
 		       s.fingerprint, f.title, f.host, f.port, s.severity, f.cves,
-		       f.remediation, s.last_snapshot_id, s.present, s.disposition,
+		       f.remediation, f.nvt_oid, f.location, f.threat, f.qod,
+		       f.evidence, f.cvss_vector, f.summary, f.insight, f.impact,
+		       f.affected, f.solution_type, f.nvt_references,
+		       r.report_id, r.scan_end_at,
+		       s.last_snapshot_id, s.present, s.disposition,
 		       s.remediation_state, s.justification,
 		       s.ticket_desired_open, s.ticket_generation
 		FROM finding_states s
@@ -422,7 +542,9 @@ func (s *Store) RecreateHookwiseFinding(
 		DispositionActive,
 		RemediationResolved,
 		RemediationWontFix,
-	).Scan(
+	)
+	var references string
+	err = row.Scan(
 		&value.CustomerID,
 		&value.CustomerName,
 		&value.ConnectWiseCustomerName,
@@ -435,6 +557,20 @@ func (s *Store) RecreateHookwiseFinding(
 		&value.Severity,
 		&value.CVEs,
 		&value.Remediation,
+		&value.NVTOID,
+		&value.Location,
+		&value.Threat,
+		&value.QOD,
+		&value.Evidence,
+		&value.CVSSVector,
+		&value.NVTSummary,
+		&value.Insight,
+		&value.Impact,
+		&value.Affected,
+		&value.SolutionType,
+		&references,
+		&value.GreenboneReportID,
+		&value.ScanEnd,
 		&value.SnapshotID,
 		&value.Present,
 		&value.Disposition,
@@ -448,6 +584,9 @@ func (s *Store) RecreateHookwiseFinding(
 	}
 	if err != nil {
 		return fmt.Errorf("loading hookwise finding for recreation: %w", err)
+	}
+	if err := json.Unmarshal([]byte(references), &value.References); err != nil {
+		return fmt.Errorf("decoding hookwise finding references: %w", err)
 	}
 	if err := enqueueHookwiseTx(ctx, tx, value, "open", value.Generation+1); err != nil {
 		return err

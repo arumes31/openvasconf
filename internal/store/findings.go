@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -161,6 +162,8 @@ func (s *Store) CurrentFindings(
 	query := `SELECT
 		f.id, f.snapshot_id, f.fingerprint, f.nvt_oid, f.title, f.host, f.port,
 		f.location, f.severity, f.threat, f.qod, f.cves, f.remediation,
+		f.evidence, f.cvss_vector, f.summary, f.insight, f.impact, f.affected,
+		f.solution_type, f.nvt_references,
 		s.customer_id, c.name, c.connectwise_customer_name,
 		s.task_id, r.task_name, r.scan_end_at,
 		s.first_seen_at, s.last_seen_at, s.disposition, s.justification,
@@ -175,11 +178,13 @@ func (s *Store) CurrentFindings(
 	result := make([]CurrentFinding, 0, min(total, pageSize))
 	for rows.Next() {
 		var value CurrentFinding
-		var cves, scanEnd, firstSeen, lastSeen string
+		var cves, references, scanEnd, firstSeen, lastSeen string
 		if err := rows.Scan(
 			&value.ID, &value.SnapshotID, &value.Fingerprint, &value.NVTOID,
 			&value.Title, &value.Host, &value.Port, &value.Location,
 			&value.Severity, &value.Threat, &value.QOD, &cves, &value.Remediation,
+			&value.Evidence, &value.CVSSVector, &value.Summary, &value.Insight,
+			&value.Impact, &value.Affected, &value.SolutionType, &references,
 			&value.CustomerID, &value.CustomerName, &value.ConnectWiseCustomerName,
 			&value.TaskID,
 			&value.TaskName, &scanEnd, &firstSeen, &lastSeen, &value.Disposition,
@@ -188,6 +193,9 @@ func (s *Store) CurrentFindings(
 			return nil, 0, closeRows(rows, "current findings query", fmt.Errorf("scanning current finding: %w", err))
 		}
 		value.CVEs = splitCVEs(cves)
+		if err := json.Unmarshal([]byte(references), &value.References); err != nil {
+			return nil, 0, closeRows(rows, "current findings query", fmt.Errorf("decoding finding references: %w", err))
+		}
 		if value.ScanEnd, err = parseReportTime(scanEnd); err != nil {
 			return nil, 0, closeRows(rows, "current findings query", err)
 		}
