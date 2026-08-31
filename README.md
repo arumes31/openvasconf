@@ -783,6 +783,10 @@ externally reachable URL.
 - The settings page shows pending, retrying, and last-delivered state. The
   Findings page shows `blocked`, `queued_open`, `open`, `queued_close`, `closed`,
   and `failed` per finding.
+- An `open` finding can be sent to Hookwise again with **Force recreate ticket**
+  when Hookwise accepted the original webhook but failed later in its
+  ConnectWise workflow. The action queues a fresh event and warns that it can
+  create a duplicate if the original ConnectWise ticket actually succeeded.
 - Rotating the bearer token does not rewrite queued payloads. Save the new token
   in openvasconf and then select **Retry failed events**.
 
@@ -801,7 +805,7 @@ processing failures.
 | Connection test creates a ticket | Add `connection_test` to Hookwise **Close Value** or add an equivalent drop routing rule for `$.state`. |
 | Finding shows `blocked` | Set a valid CID on the customer and save the reviewed customer change. |
 | Finding shows `failed` or settings show retrying events | Inspect openvasconf logs for HTTP status/diagnostic, correct the endpoint or token, then select **Retry failed events**. |
-| openvasconf says delivered but no ticket exists | Inspect Hookwise History and worker logs. A `2xx`/`202` only confirms ingestion; verify ConnectWise board, status, priority, company ID, and API permissions. |
+| openvasconf says delivered but no ticket exists | Inspect Hookwise History and worker logs. A `2xx`/`202` only confirms ingestion; verify ConnectWise board, status, priority, company ID, and API permissions. After confirming the original workflow failed and no ConnectWise ticket exists, use **Force recreate ticket** on the open finding. |
 | Ticket is assigned to the wrong company | Ensure JSON mapping contains `"customer_id": "$.cid"` and the openvasconf CID exactly matches the ConnectWise company identifier. |
 | Ticket does not close | Verify trigger `$.state`, close value `closed`, a valid Hookwise Close Status, and an unchanged summary prefix. Check whether the ConnectWise ticket summary was edited manually. |
 | Duplicate tickets appear | Keep the JSON summary mapping and Hookwise prefix stable; verify Hookwise can still query the original open ticket. |

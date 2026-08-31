@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -372,6 +373,80 @@ func (s *Store) RetryHookwiseFinding(
 	}
 	if rows < 1 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// RecreateHookwiseFinding queues a fresh open event only when the latest
+// generation was delivered and the finding is still eligible for a ticket.
+func (s *Store) RecreateHookwiseFinding(
+	ctx context.Context,
+	customerID,
+	taskID,
+	fingerprint string,
+) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning hookwise recreation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var value ticketCandidate
+	err = tx.QueryRowContext(ctx, `
+		SELECT s.customer_id, c.name, c.cid, s.task_id, r.task_name,
+		       s.fingerprint, f.title, f.host, f.port, s.severity, f.cves,
+		       f.remediation, s.last_snapshot_id, s.present, s.disposition,
+		       s.remediation_state, s.justification,
+		       s.ticket_desired_open, s.ticket_generation
+		FROM finding_states s
+		JOIN customers c ON c.id = s.customer_id
+		JOIN report_snapshots r ON r.id = s.last_snapshot_id
+		JOIN finding_snapshots f
+		  ON f.snapshot_id = s.last_snapshot_id AND f.fingerprint = s.fingerprint
+		WHERE s.customer_id = ? AND s.task_id = ? AND s.fingerprint = ?
+		  AND c.deleted_at IS NULL AND c.cid <> ''
+		  AND s.present = 1 AND s.severity >= 7.0
+		  AND s.disposition = ?
+		  AND s.remediation_state NOT IN (?, ?)
+		  AND s.ticket_desired_open = 1 AND s.ticket_state = 'open'`,
+		customerID,
+		taskID,
+		fingerprint,
+		DispositionActive,
+		RemediationResolved,
+		RemediationWontFix,
+	).Scan(
+		&value.CustomerID,
+		&value.CustomerName,
+		&value.CID,
+		&value.TaskID,
+		&value.TaskName,
+		&value.Fingerprint,
+		&value.Title,
+		&value.Host,
+		&value.Port,
+		&value.Severity,
+		&value.CVEs,
+		&value.Remediation,
+		&value.SnapshotID,
+		&value.Present,
+		&value.Disposition,
+		&value.RemediationState,
+		&value.Justification,
+		&value.DesiredOpen,
+		&value.Generation,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("loading hookwise finding for recreation: %w", err)
+	}
+	if err := enqueueHookwiseTx(ctx, tx, value, "open", value.Generation+1); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing hookwise recreation: %w", err)
 	}
 	return nil
 }

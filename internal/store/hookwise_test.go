@@ -119,6 +119,54 @@ func TestRetryHookwiseFindingIgnoresUnfailedSiblingEvent(t *testing.T) {
 	}
 }
 
+func TestRecreateHookwiseFindingQueuesNewOpenGeneration(t *testing.T) {
+	repository, fixture, delivered := hookwiseRetryTestFixture(t)
+	if err := repository.RecreateHookwiseFinding(
+		t.Context(), fixture.customerID, "task-1", "v1:ticket",
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RecreateHookwiseFinding(queued) error = %v, want ErrNotFound", err)
+	}
+	if err := repository.MarkHookwiseDelivered(t.Context(), delivered, 202); err != nil {
+		t.Fatalf("MarkHookwiseDelivered() error = %v", err)
+	}
+
+	if err := repository.RecreateHookwiseFinding(
+		t.Context(), fixture.customerID, "task-1", "v1:ticket",
+	); err != nil {
+		t.Fatalf("RecreateHookwiseFinding(open) error = %v", err)
+	}
+	events, err := repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("PendingHookwiseEvents() = %#v, %v", events, err)
+	}
+	recreated := events[0]
+	if recreated.ID == delivered.ID || recreated.Generation != delivered.Generation+1 ||
+		recreated.EventType != "open" || recreated.Attempts != 0 {
+		t.Fatalf("recreated event = %#v, delivered = %#v", recreated, delivered)
+	}
+	var payload struct {
+		EventID string `json:"event_id"`
+		State   string `json:"state"`
+	}
+	if err := json.Unmarshal(recreated.Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.EventID == "" || payload.State != "open" {
+		t.Fatalf("recreated payload = %#v", payload)
+	}
+	findings, _, err := repository.CurrentFindings(t.Context(), FindingQuery{
+		CustomerID: fixture.customerID,
+	})
+	if err != nil || len(findings) != 1 || findings[0].TicketState != "queued_open" {
+		t.Fatalf("CurrentFindings() = %#v, %v", findings, err)
+	}
+	if err := repository.RecreateHookwiseFinding(
+		t.Context(), fixture.customerID, "task-1", "v1:ticket",
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RecreateHookwiseFinding(repeated) error = %v, want ErrNotFound", err)
+	}
+}
+
 func hookwiseRetryTestFixture(t *testing.T) (*Store, customerFixture, HookwiseEvent) {
 	t.Helper()
 	repository := openTestStore(t)

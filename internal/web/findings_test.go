@@ -18,6 +18,7 @@ type findingRetryManager struct {
 	customerID  string
 	taskID      string
 	fingerprint string
+	action      string
 	err         error
 }
 
@@ -38,6 +39,20 @@ func (m *findingRetryManager) RetryFinding(
 	m.customerID = customerID
 	m.taskID = taskID
 	m.fingerprint = fingerprint
+	m.action = "retry"
+	return m.err
+}
+
+func (m *findingRetryManager) RecreateFinding(
+	_ context.Context,
+	customerID,
+	taskID,
+	fingerprint string,
+) error {
+	m.customerID = customerID
+	m.taskID = taskID
+	m.fingerprint = fingerprint
+	m.action = "recreate"
 	return m.err
 }
 
@@ -259,7 +274,83 @@ func TestFindingsRetryFailedTicket(t *testing.T) {
 		t.Fatalf("retry notice not rendered: %s", body)
 	}
 	if manager.customerID != snapshot.CustomerID || manager.taskID != snapshot.TaskID ||
-		manager.fingerprint != "v1:seeded" {
+		manager.fingerprint != "v1:seeded" || manager.action != "retry" {
 		t.Fatalf("RetryFinding() identity = %q, %q, %q", manager.customerID, manager.taskID, manager.fingerprint)
 	}
+}
+
+func TestFindingsForceRecreateOpenTicket(t *testing.T) {
+	manager := &findingRetryManager{}
+	app := newReportTestAppWithHookwise(t, manager)
+	snapshot := seedReportSnapshot(t, app)
+	value, err := app.repository.Customer(t.Context(), snapshot.CustomerID)
+	if err != nil {
+		t.Fatalf("Customer() error = %v", err)
+	}
+	value.CID = "ticket-route-7"
+	if err := app.repository.UpdateCustomer(t.Context(), value); err != nil {
+		t.Fatalf("UpdateCustomer() error = %v", err)
+	}
+	if err := app.repository.UpdateHookwiseSettings(t.Context(), customer.HookwiseSettings{
+		Enabled: true, Endpoint: "https://hookwise.test/webhook", TokenCipher: "cipher",
+	}); err != nil {
+		t.Fatalf("UpdateHookwiseSettings() error = %v", err)
+	}
+	if err := app.repository.ReconcileHookwiseOutbox(t.Context()); err != nil {
+		t.Fatalf("ReconcileHookwiseOutbox() error = %v", err)
+	}
+	events, err := app.repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("PendingHookwiseEvents() = %#v, %v", events, err)
+	}
+	if err := app.repository.MarkHookwiseDelivered(t.Context(), events[0], http.StatusAccepted); err != nil {
+		t.Fatalf("MarkHookwiseDelivered() error = %v", err)
+	}
+	login(t, app.testWebApp)
+
+	response, err := app.client.Get(app.server.URL + "/findings?ticket=open")
+	if err != nil {
+		t.Fatalf("GET /findings error = %v", err)
+	}
+	body := readBody(t, response)
+	if !strings.Contains(body, `action="/findings/ticket/recreate"`) ||
+		!strings.Contains(body, `aria-label="Force recreate ticket for OpenSSH Weak Encryption"`) ||
+		!strings.Contains(body, `data-confirm="Force Hookwise to create a new ticket attempt?`) ||
+		!strings.Contains(body, ">Force recreate ticket</button>") {
+		t.Fatalf("open finding recreate action not rendered: %s", body)
+	}
+
+	response = postForm(t, app.testWebApp, "/findings/ticket/recreate", url.Values{
+		"customer_id": {snapshot.CustomerID},
+		"task_id":     {snapshot.TaskID},
+		"fingerprint": {"v1:seeded"},
+	})
+	body = readBody(t, response)
+	if response.Request.URL.Query().Get("notice") != "ticket-recreate-requested" {
+		t.Fatalf("recreate redirect = %q", response.Request.URL.String())
+	}
+	if !strings.Contains(body, "Fresh ticket creation queued") {
+		t.Fatalf("recreate notice not rendered: %s", body)
+	}
+	if manager.customerID != snapshot.CustomerID || manager.taskID != snapshot.TaskID ||
+		manager.fingerprint != "v1:seeded" || manager.action != "recreate" {
+		t.Fatalf(
+			"RecreateFinding() identity = %q, %q, %q, action %q",
+			manager.customerID,
+			manager.taskID,
+			manager.fingerprint,
+			manager.action,
+		)
+	}
+
+	manager.err = store.ErrNotFound
+	response = postForm(t, app.testWebApp, "/findings/ticket/recreate", url.Values{
+		"customer_id": {snapshot.CustomerID},
+		"task_id":     {snapshot.TaskID},
+		"fingerprint": {"v1:seeded"},
+	})
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("non-open recreate status = %d, want %d", response.StatusCode, http.StatusConflict)
+	}
+	_ = response.Body.Close()
 }

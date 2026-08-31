@@ -156,6 +156,8 @@ func noticeText(value string) string {
 		return "Finding state saved and ticket reconciliation queued."
 	case "ticket-retry-requested":
 		return "Ticket delivery retry queued."
+	case "ticket-recreate-requested":
+		return "Fresh ticket creation queued."
 	case "scan-alert-acknowledged":
 		return "Failed scan alert acknowledged; its audit history was retained."
 	default:

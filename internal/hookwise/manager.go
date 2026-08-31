@@ -38,6 +38,7 @@ type Repository interface {
 	MarkHookwiseFailed(ctx context.Context, event store.HookwiseEvent, status int, diagnostic string) error
 	RetryHookwiseEvents(ctx context.Context) error
 	RetryHookwiseFinding(ctx context.Context, customerID, taskID, fingerprint string) error
+	RecreateHookwiseFinding(ctx context.Context, customerID, taskID, fingerprint string) error
 	HookwiseStats(ctx context.Context) (store.HookwiseStats, error)
 	AddAuditEvent(ctx context.Context, event store.AuditEvent) error
 }
@@ -238,6 +239,25 @@ func (m *Manager) RetryFinding(ctx context.Context, customerID, taskID, fingerpr
 		Detail:       "task=" + taskID,
 	}); err != nil {
 		m.logger.Warn("hookwise retry audit failed", "error", err)
+	}
+	m.Trigger()
+	return nil
+}
+
+// RecreateFinding queues a fresh open generation after Hookwise accepted the
+// previous event but failed later in its downstream ticket workflow.
+func (m *Manager) RecreateFinding(ctx context.Context, customerID, taskID, fingerprint string) error {
+	if err := m.repository.RecreateHookwiseFinding(ctx, customerID, taskID, fingerprint); err != nil {
+		return err
+	}
+	if err := m.repository.AddAuditEvent(ctx, store.AuditEvent{
+		CustomerID:   customerID,
+		Action:       "hookwise_recreate_requested",
+		ResourceKind: "finding",
+		ResourceName: fingerprint,
+		Detail:       "task=" + taskID,
+	}); err != nil {
+		m.logger.Warn("hookwise recreate audit failed", "error", err)
 	}
 	m.Trigger()
 	return nil
