@@ -323,6 +323,29 @@ func TestCustomerPreviewCreateAndSoftDelete(t *testing.T) {
 	}
 }
 
+func TestCustomerFormUsesConnectWiseCustomerName(t *testing.T) {
+	app := newTestWebApp(t)
+	login(t, app)
+
+	response, err := app.client.Get(app.server.URL + "/customers/new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, response)
+	for _, expected := range []string{
+		"ConnectWise Customer name",
+		"exact ConnectWise customer name",
+		"Sent to Hookwise as <code>connectwise_customer_name</code>",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("customer form does not contain %q", expected)
+		}
+	}
+	if strings.Contains(body, "Hookwise customer CID") {
+		t.Error("customer form still exposes Hookwise customer CID terminology")
+	}
+}
+
 func TestJSONPreviewAndSettingsOverride(t *testing.T) {
 	app := newTestWebApp(t)
 	login(t, app)

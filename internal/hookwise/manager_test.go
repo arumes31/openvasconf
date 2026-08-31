@@ -24,8 +24,9 @@ func TestManagerDispatchesOpenAndCloseLifecycle(t *testing.T) {
 	t.Cleanup(func() { _ = repository.Close() })
 
 	value := customer.Customer{
-		ID: "customer-1", Name: "Customer One", SafeName: "customer-one", CID: "cw-42",
-		ScheduleWeekday: 1, ScheduleMinute: 480, Timezone: "Europe/Vienna",
+		ID: "customer-1", Name: "Customer One", SafeName: "customer-one",
+		ConnectWiseCustomerName: "Acme Europe GmbH",
+		ScheduleWeekday:         1, ScheduleMinute: 480, Timezone: "Europe/Vienna",
 	}
 	if err := repository.CreateCustomer(ctx, value); err != nil {
 		t.Fatalf("CreateCustomer() error = %v", err)
@@ -106,7 +107,8 @@ func TestManagerDispatchesOpenAndCloseLifecycle(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatalf("events = %d, want 3", len(events))
 	}
-	if events[0]["state"] != "open" || events[0]["cid"] != "cw-42" {
+	if events[0]["state"] != "open" ||
+		events[0]["connectwise_customer_name"] != "Acme Europe GmbH" {
 		t.Errorf("open event = %#v", events[0])
 	}
 	if events[1]["state"] != "open" || events[1]["event_id"] == events[0]["event_id"] {

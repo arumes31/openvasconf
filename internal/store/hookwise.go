@@ -30,25 +30,25 @@ type HookwiseStats struct {
 }
 
 type ticketCandidate struct {
-	CustomerID       string
-	CustomerName     string
-	CID              string
-	TaskID           string
-	TaskName         string
-	Fingerprint      string
-	Title            string
-	Host             string
-	Port             string
-	Severity         float64
-	CVEs             string
-	Remediation      string
-	SnapshotID       int64
-	Present          bool
-	Disposition      string
-	RemediationState string
-	Justification    string
-	DesiredOpen      bool
-	Generation       int
+	CustomerID              string
+	CustomerName            string
+	ConnectWiseCustomerName string
+	TaskID                  string
+	TaskName                string
+	Fingerprint             string
+	Title                   string
+	Host                    string
+	Port                    string
+	Severity                float64
+	CVEs                    string
+	Remediation             string
+	SnapshotID              int64
+	Present                 bool
+	Disposition             string
+	RemediationState        string
+	Justification           string
+	DesiredOpen             bool
+	Generation              int
 }
 
 func connectWisePriority(severity float64) string {
@@ -76,7 +76,8 @@ func (s *Store) ReconcileHookwiseOutbox(ctx context.Context) error {
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT s.customer_id, c.name, c.cid, s.task_id, r.task_name,
+		SELECT s.customer_id, c.name, c.connectwise_customer_name,
+		       s.task_id, r.task_name,
 		       s.fingerprint, f.title, f.host, f.port, s.severity, f.cves,
 		       f.remediation, s.last_snapshot_id, s.present, s.disposition,
 		       s.remediation_state, s.justification,
@@ -94,7 +95,8 @@ func (s *Store) ReconcileHookwiseOutbox(ctx context.Context) error {
 	for rows.Next() {
 		var value ticketCandidate
 		if err := rows.Scan(
-			&value.CustomerID, &value.CustomerName, &value.CID, &value.TaskID,
+			&value.CustomerID, &value.CustomerName,
+			&value.ConnectWiseCustomerName, &value.TaskID,
 			&value.TaskName, &value.Fingerprint, &value.Title, &value.Host,
 			&value.Port, &value.Severity, &value.CVEs, &value.Remediation,
 			&value.SnapshotID, &value.Present, &value.Disposition,
@@ -118,7 +120,7 @@ func (s *Store) ReconcileHookwiseOutbox(ctx context.Context) error {
 			value.RemediationState != RemediationResolved &&
 			value.RemediationState != RemediationWontFix
 		switch {
-		case eligible && value.CID == "":
+		case eligible && value.ConnectWiseCustomerName == "":
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE finding_states SET ticket_state = 'blocked', updated_at = ?
 				WHERE customer_id = ? AND task_id = ? AND fingerprint = ?
@@ -173,27 +175,27 @@ func enqueueHookwiseTx(
 		value.Severity, value.Remediation,
 	)
 	payload, err := json.Marshal(map[string]any{
-		"event_id":          fmt.Sprintf("%s:%d:%s", findingKey, generation, eventType),
-		"state":             eventType,
-		"cid":               value.CID,
-		"finding_key":       findingKey,
-		"customer":          value.CustomerName,
-		"customer_id":       value.CustomerID,
-		"task":              value.TaskName,
-		"task_id":           value.TaskID,
-		"fingerprint":       value.Fingerprint,
-		"summary":           summary,
-		"description":       description,
-		"title":             value.Title,
-		"host":              value.Host,
-		"port":              value.Port,
-		"severity":          connectWisePriority(value.Severity),
-		"severitysource":    value.Severity,
-		"cves":              splitCVEs(value.CVEs),
-		"remediation":       value.Remediation,
-		"resolution":        value.Justification,
-		"remediation_state": value.RemediationState,
-		"report_path":       fmt.Sprintf("/reports/%d", value.SnapshotID),
+		"event_id":                  fmt.Sprintf("%s:%d:%s", findingKey, generation, eventType),
+		"state":                     eventType,
+		"connectwise_customer_name": value.ConnectWiseCustomerName,
+		"finding_key":               findingKey,
+		"customer":                  value.CustomerName,
+		"customer_id":               value.CustomerID,
+		"task":                      value.TaskName,
+		"task_id":                   value.TaskID,
+		"fingerprint":               value.Fingerprint,
+		"summary":                   summary,
+		"description":               description,
+		"title":                     value.Title,
+		"host":                      value.Host,
+		"port":                      value.Port,
+		"severity":                  connectWisePriority(value.Severity),
+		"severitysource":            value.Severity,
+		"cves":                      splitCVEs(value.CVEs),
+		"remediation":               value.Remediation,
+		"resolution":                value.Justification,
+		"remediation_state":         value.RemediationState,
+		"report_path":               fmt.Sprintf("/reports/%d", value.SnapshotID),
 	})
 	if err != nil {
 		return fmt.Errorf("encoding hookwise event: %w", err)
@@ -393,7 +395,8 @@ func (s *Store) RecreateHookwiseFinding(
 
 	var value ticketCandidate
 	err = tx.QueryRowContext(ctx, `
-		SELECT s.customer_id, c.name, c.cid, s.task_id, r.task_name,
+		SELECT s.customer_id, c.name, c.connectwise_customer_name,
+		       s.task_id, r.task_name,
 		       s.fingerprint, f.title, f.host, f.port, s.severity, f.cves,
 		       f.remediation, s.last_snapshot_id, s.present, s.disposition,
 		       s.remediation_state, s.justification,
@@ -404,7 +407,7 @@ func (s *Store) RecreateHookwiseFinding(
 		JOIN finding_snapshots f
 		  ON f.snapshot_id = s.last_snapshot_id AND f.fingerprint = s.fingerprint
 		WHERE s.customer_id = ? AND s.task_id = ? AND s.fingerprint = ?
-		  AND c.deleted_at IS NULL AND c.cid <> ''
+		  AND c.deleted_at IS NULL AND c.connectwise_customer_name <> ''
 		  AND s.present = 1 AND s.severity >= 7.0
 		  AND s.disposition = ?
 		  AND s.remediation_state NOT IN (?, ?)
@@ -418,7 +421,7 @@ func (s *Store) RecreateHookwiseFinding(
 	).Scan(
 		&value.CustomerID,
 		&value.CustomerName,
-		&value.CID,
+		&value.ConnectWiseCustomerName,
 		&value.TaskID,
 		&value.TaskName,
 		&value.Fingerprint,

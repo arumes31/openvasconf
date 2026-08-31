@@ -9,7 +9,7 @@ func TestScanAlertLifecycleUsesAuditJournal(t *testing.T) {
 	t.Parallel()
 	repository := openTestStore(t)
 	value := testCustomer(t, "scan-alert", []string{"10.0.0.1"})
-	value.CID = "customer-route-42"
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
 	if err := repository.CreateCustomer(t.Context(), value); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,8 @@ func TestScanAlertLifecycleUsesAuditJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(alerts) != 1 || alerts[0].CID != value.CID || alerts[0].Reason != alert.Reason {
+	if len(alerts) != 1 || alerts[0].ConnectWiseCustomerName != value.ConnectWiseCustomerName ||
+		alerts[0].Reason != alert.Reason {
 		t.Fatalf("alerts = %#v", alerts)
 	}
 	if err := repository.AcknowledgeScanAlert(t.Context(), alerts[0].ID); err != nil {

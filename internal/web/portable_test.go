@@ -19,8 +19,9 @@ func TestConfigurationExportImportLifecycle(t *testing.T) {
 	app := newTestWebApp(t)
 	login(t, app)
 	seed := customer.Customer{
-		ID: "portable-existing", Name: "portable", SafeName: "portable", CID: "cid_portable",
-		Description: "before import", Tags: []string{"production"},
+		ID: "portable-existing", Name: "portable", SafeName: "portable",
+		ConnectWiseCustomerName: "Acme Europe GmbH",
+		Description:             "before import", Tags: []string{"production"},
 		ScheduleWeekday: 2, ScheduleMinute: 9 * 60, Timezone: "Europe/Vienna",
 		Networks: []customer.Network{{
 			ID: "portable-network", CustomerID: "portable-existing", Input: "10.50.0.0/24",
@@ -45,12 +46,14 @@ func TestConfigurationExportImportLifecycle(t *testing.T) {
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if len(document.Customers) != 1 || document.Customers[0].CID != seed.CID {
+	if len(document.Customers) != 1 ||
+		document.Customers[0].ConnectWiseCustomerName != seed.ConnectWiseCustomerName {
 		t.Fatalf("exported document = %#v", document)
 	}
 	document.Customers[0].Description = "updated through import"
 	document.Customers = append(document.Customers, customer.ExportCustomer{
-		Name: "portable-new", CID: "cid_new", Tags: []string{"new"}, Networks: []string{"7.7.7.9"},
+		Name: "portable-new", ConnectWiseCustomerName: "New Customer GmbH",
+		Tags: []string{"new"}, Networks: []string{"7.7.7.9"},
 		ScheduleWeekday: 3, ScheduleMinute: 10 * 60, Timezone: "UTC",
 	})
 	payload, err := json.Marshal(document)

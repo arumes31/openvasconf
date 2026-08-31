@@ -56,30 +56,30 @@ type currentFindingExport struct {
 }
 
 type currentFindingExportRow struct {
-	CustomerID       string    `json:"customer_id"`
-	CustomerName     string    `json:"customer_name"`
-	CID              string    `json:"cid,omitempty"`
-	TaskID           string    `json:"task_id"`
-	TaskName         string    `json:"task_name"`
-	SnapshotID       int64     `json:"snapshot_id"`
-	Fingerprint      string    `json:"fingerprint"`
-	NVTOID           string    `json:"nvt_oid"`
-	Title            string    `json:"title"`
-	Host             string    `json:"host"`
-	Port             string    `json:"port,omitempty"`
-	Location         string    `json:"location,omitempty"`
-	Severity         float64   `json:"severity"`
-	Threat           string    `json:"threat"`
-	QOD              int       `json:"qod"`
-	CVEs             []string  `json:"cves"`
-	Remediation      string    `json:"remediation,omitempty"`
-	FirstSeen        time.Time `json:"first_seen"`
-	LastSeen         time.Time `json:"last_seen"`
-	Lifecycle        string    `json:"lifecycle"`
-	Disposition      string    `json:"disposition"`
-	Justification    string    `json:"justification,omitempty"`
-	RemediationState string    `json:"remediation_state"`
-	TicketState      string    `json:"ticket_state"`
+	CustomerID              string    `json:"customer_id"`
+	CustomerName            string    `json:"customer_name"`
+	ConnectWiseCustomerName string    `json:"connectwise_customer_name,omitempty"`
+	TaskID                  string    `json:"task_id"`
+	TaskName                string    `json:"task_name"`
+	SnapshotID              int64     `json:"snapshot_id"`
+	Fingerprint             string    `json:"fingerprint"`
+	NVTOID                  string    `json:"nvt_oid"`
+	Title                   string    `json:"title"`
+	Host                    string    `json:"host"`
+	Port                    string    `json:"port,omitempty"`
+	Location                string    `json:"location,omitempty"`
+	Severity                float64   `json:"severity"`
+	Threat                  string    `json:"threat"`
+	QOD                     int       `json:"qod"`
+	CVEs                    []string  `json:"cves"`
+	Remediation             string    `json:"remediation,omitempty"`
+	FirstSeen               time.Time `json:"first_seen"`
+	LastSeen                time.Time `json:"last_seen"`
+	Lifecycle               string    `json:"lifecycle"`
+	Disposition             string    `json:"disposition"`
+	Justification           string    `json:"justification,omitempty"`
+	RemediationState        string    `json:"remediation_state"`
+	TicketState             string    `json:"ticket_state"`
 }
 
 func (s *Server) findingsJSONExport(response http.ResponseWriter, request *http.Request) {
@@ -123,29 +123,31 @@ func findingFilterFromRequest(request *http.Request, pageSize int) store.Finding
 	page, _ := strconv.Atoi(query.Get("page"))
 	return store.FindingQuery{
 		CustomerID: query.Get("customer"),
-		CID:        strings.TrimSpace(query.Get("cid")),
-		Task:       strings.TrimSpace(query.Get("task")),
-		Severity:   query.Get("severity"),
-		Host:       strings.TrimSpace(query.Get("host")),
-		Scope:      query.Get("scope"),
-		Ticket:     query.Get("ticket"),
-		Lifecycle:  query.Get("lifecycle"),
-		Page:       max(page, 1),
-		PageSize:   pageSize,
+		ConnectWiseCustomerName: strings.TrimSpace(
+			query.Get("connectwise_customer_name"),
+		),
+		Task:      strings.TrimSpace(query.Get("task")),
+		Severity:  query.Get("severity"),
+		Host:      strings.TrimSpace(query.Get("host")),
+		Scope:     query.Get("scope"),
+		Ticket:    query.Get("ticket"),
+		Lifecycle: query.Get("lifecycle"),
+		Page:      max(page, 1),
+		PageSize:  pageSize,
 	}
 }
 
 func currentFindingFilters(filter store.FindingQuery) map[string]string {
 	filters := make(map[string]string)
 	for name, value := range map[string]string{
-		"customer":  filter.CustomerID,
-		"cid":       filter.CID,
-		"task":      filter.Task,
-		"severity":  filter.Severity,
-		"host":      filter.Host,
-		"scope":     filter.Scope,
-		"ticket":    filter.Ticket,
-		"lifecycle": filter.Lifecycle,
+		"customer":                  filter.CustomerID,
+		"connectwise_customer_name": filter.ConnectWiseCustomerName,
+		"task":                      filter.Task,
+		"severity":                  filter.Severity,
+		"host":                      filter.Host,
+		"scope":                     filter.Scope,
+		"ticket":                    filter.Ticket,
+		"lifecycle":                 filter.Lifecycle,
 	} {
 		if value != "" {
 			filters[name] = value
@@ -156,8 +158,9 @@ func currentFindingFilters(filter store.FindingQuery) map[string]string {
 
 func currentFindingJSON(row store.CurrentFinding) currentFindingExportRow {
 	return currentFindingExportRow{
-		CustomerID: row.CustomerID, CustomerName: row.CustomerName, CID: row.CID,
-		TaskID: row.TaskID, TaskName: row.TaskName, SnapshotID: row.SnapshotID,
+		CustomerID: row.CustomerID, CustomerName: row.CustomerName,
+		ConnectWiseCustomerName: row.ConnectWiseCustomerName,
+		TaskID:                  row.TaskID, TaskName: row.TaskName, SnapshotID: row.SnapshotID,
 		Fingerprint: row.Fingerprint, NVTOID: row.NVTOID, Title: row.Title,
 		Host: row.Host, Port: row.Port, Location: row.Location,
 		Severity: row.Severity, Threat: row.Threat, QOD: row.QOD,

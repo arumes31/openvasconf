@@ -40,7 +40,7 @@
 </header>
 {{end}}
 <main class="shell" id="main-content" tabindex="-1">
-{{range .ScanAlerts}}<div class="alert alert-error scan-alert" role="alert"><span>SCAN FAILED</span><div><strong>{{.CustomerName}}</strong>{{if .CID}} · CID {{.CID}}{{end}} · {{.TaskName}}<small>{{.Reason}} · {{.DetectedAt.Format "2006-01-02 15:04 MST"}}</small></div><form method="post" action="/scan-alerts/{{.ID}}/acknowledge"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="text-button" type="submit">Acknowledge</button></form></div>{{end}}
+{{range .ScanAlerts}}<div class="alert alert-error scan-alert" role="alert"><span>SCAN FAILED</span><div><strong>{{.CustomerName}}</strong>{{if .ConnectWiseCustomerName}} · ConnectWise {{.ConnectWiseCustomerName}}{{end}} · {{.TaskName}}<small>{{.Reason}} · {{.DetectedAt.Format "2006-01-02 15:04 MST"}}</small></div><form method="post" action="/scan-alerts/{{.ID}}/acknowledge"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="text-button" type="submit">Acknowledge</button></form></div>{{end}}
 {{if .Error}}<div class="alert alert-error" role="alert"><span>FAULT</span>{{.Error}}</div>{{end}}
 {{if .Notice}}<div class="alert"><span>INFO</span>{{.Notice}}</div>{{end}}
 {{if .GreenboneError}}<div class="alert alert-warn" role="alert"><span>GMP</span>{{.GreenboneError}}</div>{{end}}

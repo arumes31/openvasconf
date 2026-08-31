@@ -19,7 +19,7 @@ func TestStoreApplyImportCreatesAndUpdatesCustomers(t *testing.T) {
 	settings.Timezone = "UTC"
 	settings.SchedulePolicy = customer.SchedulePolicy{Weekdays: []int{1, 3, 5}, StartMinute: 60, EndMinute: 120}
 	value := testCustomer(t, "imported", []string{"10.40.0.0/24"})
-	value.CID = "customer_40"
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
 	value.Description = "created by import"
 	value.Tags = []string{"imported", "production"}
 	if err := database.ApplyImport(ctx, settings, []customer.Customer{value}); err != nil {
@@ -30,7 +30,8 @@ func TestStoreApplyImportCreatesAndUpdatesCustomers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.CID != value.CID || len(created.Networks) != 1 || created.DesiredRevision != 1 {
+	if created.ConnectWiseCustomerName != value.ConnectWiseCustomerName ||
+		len(created.Networks) != 1 || created.DesiredRevision != 1 {
 		t.Errorf("created customer = %#v", created)
 	}
 	gotSettings, err := database.Settings(ctx)
@@ -76,9 +77,9 @@ func TestStoreApplyImportRollsBackInvalidInput(t *testing.T) {
 
 	settings.Timezone = "UTC"
 	value := testCustomer(t, "invalid-import", []string{"6.6.6.0/24"})
-	value.CID = "invalid cid"
+	value.ConnectWiseCustomerName = " invalid customer name"
 	if err := database.ApplyImport(ctx, settings, []customer.Customer{value}); err == nil {
-		t.Fatal("ApplyImport(invalid CID) error = nil")
+		t.Fatal("ApplyImport(invalid ConnectWise customer name) error = nil")
 	}
 	if _, err := database.Customer(ctx, value.ID); err == nil {
 		t.Fatal("invalid customer was committed")

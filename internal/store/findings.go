@@ -18,33 +18,33 @@ const (
 // finding with its persistent operational state.
 type CurrentFinding struct {
 	FindingSnapshot
-	CustomerID       string
-	CustomerName     string
-	CID              string
-	TaskID           string
-	TaskName         string
-	ScanEnd          time.Time
-	FirstSeen        time.Time
-	LastSeen         time.Time
-	Disposition      string
-	Justification    string
-	RemediationState string
-	TicketState      string
-	Lifecycle        string
+	CustomerID              string
+	CustomerName            string
+	ConnectWiseCustomerName string
+	TaskID                  string
+	TaskName                string
+	ScanEnd                 time.Time
+	FirstSeen               time.Time
+	LastSeen                time.Time
+	Disposition             string
+	Justification           string
+	RemediationState        string
+	TicketState             string
+	Lifecycle               string
 }
 
 // FindingQuery controls server-side current-exposure filtering and pagination.
 type FindingQuery struct {
-	CustomerID string
-	CID        string
-	Task       string
-	Severity   string
-	Host       string
-	Scope      string
-	Ticket     string
-	Lifecycle  string
-	Page       int
-	PageSize   int
+	CustomerID              string
+	ConnectWiseCustomerName string
+	Task                    string
+	Severity                string
+	Host                    string
+	Scope                   string
+	Ticket                  string
+	Lifecycle               string
+	Page                    int
+	PageSize                int
 }
 
 // FindingMetrics summarizes current exposure and ticket-delivery attention.
@@ -161,7 +161,8 @@ func (s *Store) CurrentFindings(
 	query := `SELECT
 		f.id, f.snapshot_id, f.fingerprint, f.nvt_oid, f.title, f.host, f.port,
 		f.location, f.severity, f.threat, f.qod, f.cves, f.remediation,
-		s.customer_id, c.name, c.cid, s.task_id, r.task_name, r.scan_end_at,
+		s.customer_id, c.name, c.connectwise_customer_name,
+		s.task_id, r.task_name, r.scan_end_at,
 		s.first_seen_at, s.last_seen_at, s.disposition, s.justification,
 		s.remediation_state, s.ticket_state ` + from + where + `
 		ORDER BY f.severity DESC, c.name COLLATE NOCASE, f.host, f.title
@@ -179,7 +180,8 @@ func (s *Store) CurrentFindings(
 			&value.ID, &value.SnapshotID, &value.Fingerprint, &value.NVTOID,
 			&value.Title, &value.Host, &value.Port, &value.Location,
 			&value.Severity, &value.Threat, &value.QOD, &cves, &value.Remediation,
-			&value.CustomerID, &value.CustomerName, &value.CID, &value.TaskID,
+			&value.CustomerID, &value.CustomerName, &value.ConnectWiseCustomerName,
+			&value.TaskID,
 			&value.TaskName, &scanEnd, &firstSeen, &lastSeen, &value.Disposition,
 			&value.Justification, &value.RemediationState, &value.TicketState,
 		); err != nil {
@@ -225,9 +227,9 @@ func currentFindingWhere(filter FindingQuery) (string, []any, error) {
 		clauses = append(clauses, "s.customer_id = ?")
 		args = append(args, filter.CustomerID)
 	}
-	if filter.CID != "" {
-		clauses = append(clauses, "c.cid LIKE ? ESCAPE '\\'")
-		args = append(args, "%"+escapeLike(filter.CID)+"%")
+	if filter.ConnectWiseCustomerName != "" {
+		clauses = append(clauses, "c.connectwise_customer_name LIKE ? ESCAPE '\\'")
+		args = append(args, "%"+escapeLike(filter.ConnectWiseCustomerName)+"%")
 	}
 	if filter.Task != "" {
 		clauses = append(clauses, "(r.task_name LIKE ? ESCAPE '\\' OR s.task_id LIKE ? ESCAPE '\\')")

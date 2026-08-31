@@ -227,7 +227,7 @@ func TestFindingsRetryFailedTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Customer() error = %v", err)
 	}
-	value.CID = "ticket-route-7"
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
 	if err := app.repository.UpdateCustomer(t.Context(), value); err != nil {
 		t.Fatalf("UpdateCustomer() error = %v", err)
 	}
@@ -287,7 +287,7 @@ func TestFindingsForceRecreateOpenTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Customer() error = %v", err)
 	}
-	value.CID = "ticket-route-7"
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
 	if err := app.repository.UpdateCustomer(t.Context(), value); err != nil {
 		t.Fatalf("UpdateCustomer() error = %v", err)
 	}

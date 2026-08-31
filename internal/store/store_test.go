@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"path/filepath"
@@ -167,6 +168,115 @@ func TestStorePersistsAcrossRestart(t *testing.T) {
 	}
 	if restarted.InstallationID != settings.InstallationID || restarted.Timezone != "Europe/Vienna" {
 		t.Errorf("restarted settings = %#v, initial = %#v", restarted, settings)
+	}
+}
+
+func TestConnectWiseCustomerNameMigrationBackfillsCID(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "connectwise-name-upgrade.db")
+	dsn := "file:" + url.PathEscape(filepath.ToSlash(path)) + "?_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	legacy := &Store{db: db}
+	for _, migration := range []struct {
+		version int
+		name    string
+	}{
+		{version: 1, name: "001_initial.sql"},
+		{version: 2, name: "002_operator_features.sql"},
+		{version: 3, name: "003_schedule_freedom.sql"},
+		{version: 4, name: "004_reporting.sql"},
+		{version: 5, name: "005_lifecycle.sql"},
+		{version: 6, name: "006_updater.sql"},
+		{version: 7, name: "007_global_findings_hookwise.sql"},
+	} {
+		statement, readErr := migrationFiles.ReadFile("migrations/" + migration.name)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err := legacy.applyMigration(ctx, migration.version, string(statement)); err != nil {
+			t.Fatalf("applyMigration(%d) error = %v", migration.version, err)
+		}
+	}
+	const storedTime = "2026-08-31T15:00:00Z"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO customers(
+			id, name, safe_name, cid, schedule_weekday, schedule_minute,
+			timezone, created_at, updated_at
+		) VALUES('connectwise-name', 'Customer', 'customer', 'Acme Europe GmbH',
+		         2, 540, 'Europe/Vienna', ?, ?)`, storedTime, storedTime); err != nil {
+		t.Fatalf("seeding legacy customer: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO hookwise_outbox(
+			event_key, customer_id, task_id, fingerprint, generation,
+			event_type, payload, next_attempt_at, created_at
+		) VALUES('legacy-event', 'connectwise-name', 'task', 'finding', 1,
+		         'open', '{"cid":"Acme Europe GmbH","state":"open"}', ?, ?)`,
+		storedTime,
+		storedTime,
+	); err != nil {
+		t.Fatalf("seeding legacy Hookwise event: %v", err)
+	}
+	migration, err := migrationFiles.ReadFile("migrations/008_connectwise_customer_name.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.applyMigration(ctx, 8, string(migration)); err != nil {
+		t.Fatalf("applyMigration(8) error = %v", err)
+	}
+	var connectWiseCustomerName, legacyCID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT connectwise_customer_name, cid FROM customers WHERE id = ?`,
+		"connectwise-name",
+	).Scan(&connectWiseCustomerName, &legacyCID); err != nil {
+		t.Fatal(err)
+	}
+	if connectWiseCustomerName != "Acme Europe GmbH" || legacyCID != connectWiseCustomerName {
+		t.Errorf(
+			"customer names after migration = %q, %q",
+			connectWiseCustomerName,
+			legacyCID,
+		)
+	}
+	var payloadText string
+	if err := db.QueryRowContext(
+		ctx,
+		"SELECT payload FROM hookwise_outbox WHERE event_key = 'legacy-event'",
+	).Scan(&payloadText); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
+		t.Fatalf("decoding migrated Hookwise payload: %v", err)
+	}
+	var migratedName string
+	if err := json.Unmarshal(payload["connectwise_customer_name"], &migratedName); err != nil {
+		t.Fatalf("decoding migrated customer name: %v", err)
+	}
+	if migratedName != "Acme Europe GmbH" {
+		t.Errorf("migrated customer name = %q", migratedName)
+	}
+	if _, found := payload["cid"]; found {
+		t.Error("legacy cid remains in migrated Hookwise payload")
+	}
+	var version int
+	if err := db.QueryRowContext(
+		ctx,
+		"SELECT version FROM schema_migrations WHERE version = 8",
+	).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 8 {
+		t.Errorf("migration version = %d, want 8", version)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

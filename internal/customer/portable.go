@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"openvasconf/internal/networkplan"
 )
 
-const ExportVersion = 1
+const ExportVersion = 2
 
 type ExportDocument struct {
 	Version        int              `json:"version"`
@@ -23,18 +25,18 @@ type ExportDocument struct {
 }
 
 type ExportCustomer struct {
-	ID              string    `json:"id,omitempty"`
-	CID             string    `json:"cid,omitempty"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	Tags            []string  `json:"tags,omitempty"`
-	Networks        []string  `json:"networks"`
-	ScheduleWeekday int       `json:"schedule_weekday"`
-	ScheduleMinute  int       `json:"schedule_minute"`
-	Timezone        string    `json:"timezone"`
-	Scanner         Selection `json:"scanner_override,omitempty"`
-	ScanConfig      Selection `json:"scan_config_override,omitempty"`
-	PortList        Selection `json:"port_list_override,omitempty"`
+	ID                      string    `json:"id,omitempty"`
+	ConnectWiseCustomerName string    `json:"connectwise_customer_name,omitempty"`
+	Name                    string    `json:"name"`
+	Description             string    `json:"description,omitempty"`
+	Tags                    []string  `json:"tags,omitempty"`
+	Networks                []string  `json:"networks"`
+	ScheduleWeekday         int       `json:"schedule_weekday"`
+	ScheduleMinute          int       `json:"schedule_minute"`
+	Timezone                string    `json:"timezone"`
+	Scanner                 Selection `json:"scanner_override,omitempty"`
+	ScanConfig              Selection `json:"scan_config_override,omitempty"`
+	PortList                Selection `json:"port_list_override,omitempty"`
 }
 
 func NewExportDocument(settings Settings, customers []Customer, now time.Time) ExportDocument {
@@ -45,18 +47,18 @@ func NewExportDocument(settings Settings, customers []Customer, now time.Time) E
 			networks = append(networks, network.Prefix)
 		}
 		values = append(values, ExportCustomer{
-			ID:              value.ID,
-			CID:             value.CID,
-			Name:            value.Name,
-			Description:     value.Description,
-			Tags:            value.Tags,
-			Networks:        networks,
-			ScheduleWeekday: value.ScheduleWeekday,
-			ScheduleMinute:  value.ScheduleMinute,
-			Timezone:        value.Timezone,
-			Scanner:         Selection{ID: value.ScannerID, Name: value.ScannerName},
-			ScanConfig:      Selection{ID: value.ScanConfigID, Name: value.ScanConfigName},
-			PortList:        Selection{ID: value.PortListID, Name: value.PortListName},
+			ID:                      value.ID,
+			ConnectWiseCustomerName: value.ConnectWiseCustomerName,
+			Name:                    value.Name,
+			Description:             value.Description,
+			Tags:                    value.Tags,
+			Networks:                networks,
+			ScheduleWeekday:         value.ScheduleWeekday,
+			ScheduleMinute:          value.ScheduleMinute,
+			Timezone:                value.Timezone,
+			Scanner:                 Selection{ID: value.ScannerID, Name: value.ScannerName},
+			ScanConfig:              Selection{ID: value.ScanConfigID, Name: value.ScanConfigName},
+			PortList:                Selection{ID: value.PortListID, Name: value.PortListName},
 		})
 	}
 	return ExportDocument{
@@ -112,7 +114,7 @@ func (c ExportCustomer) Validate() error {
 	if len(c.Description) > 500 {
 		return errors.New("customer description must contain at most 500 characters")
 	}
-	if err := ValidateCID(c.CID); err != nil {
+	if err := ValidateConnectWiseCustomerName(c.ConnectWiseCustomerName); err != nil {
 		return err
 	}
 	if _, err := NormalizeTags(c.Tags...); err != nil {
@@ -139,20 +141,21 @@ func (c ExportCustomer) Validate() error {
 	return nil
 }
 
-// ValidateCID accepts the customer routing identifiers supported by
-// Hookwise/ConnectWise without allowing whitespace or control characters.
-func ValidateCID(value string) error {
-	if len(value) > 100 {
-		return errors.New("customer cid must contain at most 100 characters")
+// ValidateConnectWiseCustomerName accepts a human-readable ConnectWise company
+// name while excluding ambiguous surrounding whitespace and control characters.
+func ValidateConnectWiseCustomerName(value string) error {
+	if !utf8.ValidString(value) {
+		return errors.New("connectwise customer name must be valid utf-8")
 	}
-	for _, char := range value {
-		switch {
-		case char >= 'a' && char <= 'z':
-		case char >= 'A' && char <= 'Z':
-		case char >= '0' && char <= '9':
-		case strings.ContainsRune("._:-", char):
-		default:
-			return errors.New("customer cid may contain only letters, numbers, dot, underscore, colon, and hyphen")
+	if value != strings.TrimSpace(value) {
+		return errors.New("connectwise customer name must not contain surrounding whitespace")
+	}
+	if utf8.RuneCountInString(value) > 100 {
+		return errors.New("connectwise customer name must contain at most 100 characters")
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return errors.New("connectwise customer name must not contain control characters")
 		}
 	}
 	return nil

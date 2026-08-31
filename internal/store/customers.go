@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Store) CreateCustomer(ctx context.Context, value customer.Customer) error {
-	if err := customer.ValidateCID(value.CID); err != nil {
+	if err := customer.ValidateConnectWiseCustomerName(value.ConnectWiseCustomerName); err != nil {
 		return fmt.Errorf("creating customer: %w", err)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -24,15 +24,16 @@ func (s *Store) CreateCustomer(ctx context.Context, value customer.Customer) err
 	now := nowText()
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO customers(
-			id, name, safe_name, cid, description, tags,
+			id, name, safe_name, connectwise_customer_name, cid, description, tags,
 			schedule_weekday, schedule_minute, timezone,
 			scanner_id, scanner_name, scan_config_id, scan_config_name,
 			port_list_id, port_list_name, desired_revision, created_at, updated_at
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 		value.ID,
 		value.Name,
 		value.SafeName,
-		value.CID,
+		value.ConnectWiseCustomerName,
+		value.ConnectWiseCustomerName,
 		value.Description,
 		strings.Join(value.Tags, ","),
 		value.ScheduleWeekday,
@@ -60,7 +61,7 @@ func (s *Store) CreateCustomer(ctx context.Context, value customer.Customer) err
 }
 
 func (s *Store) UpdateCustomer(ctx context.Context, value customer.Customer) error {
-	if err := customer.ValidateCID(value.CID); err != nil {
+	if err := customer.ValidateConnectWiseCustomerName(value.ConnectWiseCustomerName); err != nil {
 		return fmt.Errorf("updating customer: %w", err)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -71,7 +72,8 @@ func (s *Store) UpdateCustomer(ctx context.Context, value customer.Customer) err
 
 	result, err := tx.ExecContext(ctx, `
 		UPDATE customers SET
-			name = ?, safe_name = ?, cid = ?, description = ?, tags = ?,
+			name = ?, safe_name = ?, connectwise_customer_name = ?, cid = ?,
+			description = ?, tags = ?,
 			schedule_weekday = ?, schedule_minute = ?, timezone = ?,
 			scanner_id = ?, scanner_name = ?, scan_config_id = ?, scan_config_name = ?,
 			port_list_id = ?, port_list_name = ?, desired_revision = desired_revision + 1,
@@ -79,7 +81,8 @@ func (s *Store) UpdateCustomer(ctx context.Context, value customer.Customer) err
 		WHERE id = ? AND deleted_at IS NULL`,
 		value.Name,
 		value.SafeName,
-		value.CID,
+		value.ConnectWiseCustomerName,
+		value.ConnectWiseCustomerName,
 		value.Description,
 		strings.Join(value.Tags, ","),
 		value.ScheduleWeekday,
@@ -169,7 +172,7 @@ func (s *Store) ListCustomers(
 		query += " AND deleted_at IS NULL"
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
-		query += " AND (name LIKE ? ESCAPE '\\' OR cid LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')"
+		query += " AND (name LIKE ? ESCAPE '\\' OR connectwise_customer_name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')"
 		pattern := "%" + escapeLike(search) + "%"
 		args = append(args, pattern, pattern, pattern, pattern)
 	}
@@ -238,7 +241,7 @@ func escapeLike(value string) string {
 }
 
 const customerSelect = `
-	SELECT id, name, safe_name, cid, description, tags,
+	SELECT id, name, safe_name, connectwise_customer_name, description, tags,
 	       schedule_weekday, schedule_minute, timezone,
 	       scanner_id, scanner_name, scan_config_id, scan_config_name,
 	       port_list_id, port_list_name, desired_revision,
@@ -269,7 +272,7 @@ func scanCustomer(row rowScanner) (customer.Customer, error) {
 		&value.ID,
 		&value.Name,
 		&value.SafeName,
-		&value.CID,
+		&value.ConnectWiseCustomerName,
 		&value.Description,
 		&tags,
 		&value.ScheduleWeekday,

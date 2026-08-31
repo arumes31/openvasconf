@@ -24,7 +24,7 @@ func TestReconcileHookwiseOutboxMapsSeverityToConnectWisePriority(t *testing.T) 
 		t.Run(testCase.name, func(t *testing.T) {
 			repository := openTestStore(t)
 			value := testCustomer(t, "connectwise-priority", []string{"10.59.0.1"})
-			value.CID = "cid-59"
+			value.ConnectWiseCustomerName = "Acme Europe GmbH"
 			if err := repository.CreateCustomer(t.Context(), value); err != nil {
 				t.Fatalf("CreateCustomer() error = %v", err)
 			}
@@ -53,8 +53,9 @@ func TestReconcileHookwiseOutboxMapsSeverityToConnectWisePriority(t *testing.T) 
 				t.Fatalf("PendingHookwiseEvents() = %#v, %v", events, err)
 			}
 			var payload struct {
-				Severity       string  `json:"severity"`
-				SeveritySource float64 `json:"severitysource"`
+				ConnectWiseCustomerName string  `json:"connectwise_customer_name"`
+				Severity                string  `json:"severity"`
+				SeveritySource          float64 `json:"severitysource"`
 			}
 			if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
 				t.Fatalf("json.Unmarshal() error = %v", err)
@@ -64,6 +65,20 @@ func TestReconcileHookwiseOutboxMapsSeverityToConnectWisePriority(t *testing.T) 
 			}
 			if payload.SeveritySource != testCase.severity {
 				t.Errorf("severitysource = %v, want %v", payload.SeveritySource, testCase.severity)
+			}
+			if payload.ConnectWiseCustomerName != value.ConnectWiseCustomerName {
+				t.Errorf(
+					"connectwise_customer_name = %q, want %q",
+					payload.ConnectWiseCustomerName,
+					value.ConnectWiseCustomerName,
+				)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(events[0].Payload, &fields); err != nil {
+				t.Fatalf("json.Unmarshal(fields) error = %v", err)
+			}
+			if _, found := fields["cid"]; found {
+				t.Error("legacy cid field is still present in Hookwise payload")
 			}
 		})
 	}
@@ -171,7 +186,7 @@ func hookwiseRetryTestFixture(t *testing.T) (*Store, customerFixture, HookwiseEv
 	t.Helper()
 	repository := openTestStore(t)
 	value := testCustomer(t, "ticket-retry", []string{"10.58.0.1"})
-	value.CID = "cid-58"
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
 	if err := repository.CreateCustomer(t.Context(), value); err != nil {
 		t.Fatalf("CreateCustomer() error = %v", err)
 	}
