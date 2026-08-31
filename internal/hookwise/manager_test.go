@@ -24,8 +24,9 @@ func TestManagerDispatchesOpenAndCloseLifecycle(t *testing.T) {
 	t.Cleanup(func() { _ = repository.Close() })
 
 	value := customer.Customer{
-		ID: "customer-1", Name: "Customer One", SafeName: "customer-one", CID: "cw-42",
-		ScheduleWeekday: 1, ScheduleMinute: 480, Timezone: "Europe/Vienna",
+		ID: "customer-1", Name: "Customer One", SafeName: "customer-one",
+		ConnectWiseCustomerName: "Acme Europe GmbH",
+		ScheduleWeekday:         1, ScheduleMinute: 480, Timezone: "Europe/Vienna",
 	}
 	if err := repository.CreateCustomer(ctx, value); err != nil {
 		t.Fatalf("CreateCustomer() error = %v", err)
@@ -84,6 +85,12 @@ func TestManagerDispatchesOpenAndCloseLifecycle(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].TicketState != "open" {
 		t.Fatalf("current ticket state = %#v, error = %v", rows, err)
 	}
+	if err := manager.RecreateFinding(ctx, value.ID, "task-1", finding.Fingerprint); err != nil {
+		t.Fatalf("RecreateFinding() error = %v", err)
+	}
+	if err := manager.DispatchOnce(ctx); err != nil {
+		t.Fatalf("recreate DispatchOnce() error = %v", err)
+	}
 	if err := repository.UpsertAnnotation(ctx, store.FindingAnnotation{
 		CustomerID: value.ID, TaskID: "task-1", Fingerprint: finding.Fingerprint,
 		Disposition: store.DispositionActive, Justification: "patched",
@@ -97,17 +104,26 @@ func TestManagerDispatchesOpenAndCloseLifecycle(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(events) != 2 {
-		t.Fatalf("events = %d, want 2", len(events))
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
 	}
-	if events[0]["state"] != "open" || events[0]["cid"] != "cw-42" {
+	if events[0]["state"] != "open" ||
+		events[0]["connectwise_customer_name"] != "Acme Europe GmbH" {
 		t.Errorf("open event = %#v", events[0])
 	}
-	if events[1]["state"] != "closed" || events[1]["finding_key"] != events[0]["finding_key"] {
-		t.Errorf("close event = %#v", events[1])
+	if events[1]["state"] != "open" || events[1]["event_id"] == events[0]["event_id"] {
+		t.Errorf("recreated event = %#v", events[1])
 	}
-	if events[1]["summary"] != events[0]["summary"] {
-		t.Errorf("ticket summary changed across lifecycle: %q → %q", events[0]["summary"], events[1]["summary"])
+	if events[2]["state"] != "closed" || events[2]["finding_key"] != events[0]["finding_key"] {
+		t.Errorf("close event = %#v", events[2])
+	}
+	if events[1]["summary"] != events[0]["summary"] || events[2]["summary"] != events[0]["summary"] {
+		t.Errorf(
+			"ticket summary changed across lifecycle: %q → %q → %q",
+			events[0]["summary"],
+			events[1]["summary"],
+			events[2]["summary"],
+		)
 	}
 }
 

@@ -35,12 +35,13 @@ func (s *Store) ApplyImport(
 		return fmt.Errorf("importing settings: %w", err)
 	}
 	for _, value := range customers {
-		if err := customer.ValidateCID(value.CID); err != nil {
+		if err := customer.ValidateConnectWiseCustomerName(value.ConnectWiseCustomerName); err != nil {
 			return fmt.Errorf("importing customer %q: %w", value.Name, err)
 		}
 		now := nowText()
 		result, err := tx.ExecContext(ctx, `
-			UPDATE customers SET name = ?, safe_name = ?, cid = ?, description = ?, tags = ?,
+			UPDATE customers SET name = ?, safe_name = ?,
+			       connectwise_customer_name = ?, description = ?, tags = ?,
 			       schedule_weekday = ?, schedule_minute = ?, timezone = ?,
 			       scanner_id = ?, scanner_name = ?, scan_config_id = ?, scan_config_name = ?,
 			       port_list_id = ?, port_list_name = ?, desired_revision = desired_revision + 1,
@@ -49,7 +50,7 @@ func (s *Store) ApplyImport(
 			WHERE id = ? AND deleted_at IS NULL`,
 			value.Name,
 			value.SafeName,
-			value.CID,
+			value.ConnectWiseCustomerName,
 			value.Description,
 			strings.Join(value.Tags, ","),
 			value.ScheduleWeekday,
@@ -74,15 +75,17 @@ func (s *Store) ApplyImport(
 		if rows == 0 {
 			_, err = tx.ExecContext(ctx, `
 				INSERT INTO customers(
-					id, name, safe_name, cid, description, tags,
+					id, name, safe_name, connectwise_customer_name, cid,
+					description, tags,
 					schedule_weekday, schedule_minute, timezone,
 					scanner_id, scanner_name, scan_config_id, scan_config_name,
 					port_list_id, port_list_name, desired_revision, created_at, updated_at
-				) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+				) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 				value.ID,
 				value.Name,
 				value.SafeName,
-				value.CID,
+				value.ConnectWiseCustomerName,
+				"",
 				value.Description,
 				strings.Join(value.Tags, ","),
 				value.ScheduleWeekday,

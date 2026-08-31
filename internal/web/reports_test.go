@@ -37,6 +37,10 @@ type reportTestApp struct {
 }
 
 func newReportTestApp(t *testing.T) reportTestApp {
+	return newReportTestAppWithHookwise(t, nil)
+}
+
+func newReportTestAppWithHookwise(t *testing.T, hookwise hookwiseManager) reportTestApp {
 	t.Helper()
 	repository, err := store.Open(
 		context.Background(),
@@ -59,6 +63,7 @@ func newReportTestApp(t *testing.T) reportTestApp {
 		Greenbone:  fakeGreenbone{options: testOptions()},
 		Syncer:     &triggerCounter{},
 		Reports:    reportSync,
+		Hookwise:   hookwise,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

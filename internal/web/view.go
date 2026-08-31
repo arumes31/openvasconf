@@ -105,19 +105,19 @@ type comparisonView struct {
 }
 
 type customerForm struct {
-	ID           string
-	CID          string
-	Name         string
-	Description  string
-	Tags         string
-	Networks     string
-	ScannerID    string
-	ScanConfigID string
-	PortListID   string
-	Editing      bool
-	Schedule     string
-	Weekday      int
-	Time         string
+	ID                      string
+	ConnectWiseCustomerName string
+	Name                    string
+	Description             string
+	Tags                    string
+	Networks                string
+	ScannerID               string
+	ScanConfigID            string
+	PortListID              string
+	Editing                 bool
+	Schedule                string
+	Weekday                 int
+	Time                    string
 }
 
 type changePreview struct {
@@ -180,18 +180,18 @@ func formFromCustomer(value customer.Customer) customerForm {
 		networks = append(networks, network.Input)
 	}
 	return customerForm{
-		ID:           value.ID,
-		CID:          value.CID,
-		Name:         value.Name,
-		Description:  value.Description,
-		Tags:         strings.Join(value.Tags, ", "),
-		Networks:     strings.Join(networks, "\n"),
-		ScannerID:    value.ScannerID,
-		ScanConfigID: value.ScanConfigID,
-		PortListID:   value.PortListID,
-		Editing:      value.ID != "",
-		Weekday:      value.ScheduleWeekday,
-		Time:         value.ScheduleTime(),
+		ID:                      value.ID,
+		ConnectWiseCustomerName: value.ConnectWiseCustomerName,
+		Name:                    value.Name,
+		Description:             value.Description,
+		Tags:                    strings.Join(value.Tags, ", "),
+		Networks:                strings.Join(networks, "\n"),
+		ScannerID:               value.ScannerID,
+		ScanConfigID:            value.ScanConfigID,
+		PortListID:              value.PortListID,
+		Editing:                 value.ID != "",
+		Weekday:                 value.ScheduleWeekday,
+		Time:                    value.ScheduleTime(),
 		Schedule: fmt.Sprintf(
 			"%s at %s · %s",
 			customer.WeekdayName(value.ScheduleWeekday),

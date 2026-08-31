@@ -276,20 +276,20 @@ func (s *Server) customerFromForm(
 	existing *customer.Customer,
 ) (customer.Customer, networkplan.Plan, customerForm, error) {
 	form := customerForm{
-		Name:         strings.TrimSpace(request.PostForm.Get("name")),
-		CID:          strings.TrimSpace(request.PostForm.Get("cid")),
-		Description:  strings.TrimSpace(request.PostForm.Get("description")),
-		Tags:         strings.TrimSpace(request.PostForm.Get("tags")),
-		Networks:     strings.TrimSpace(request.PostForm.Get("networks")),
-		ScannerID:    request.PostForm.Get("scanner_id"),
-		ScanConfigID: request.PostForm.Get("scan_config_id"),
-		PortListID:   request.PostForm.Get("port_list_id"),
-		Editing:      existing != nil,
+		Name:                    strings.TrimSpace(request.PostForm.Get("name")),
+		ConnectWiseCustomerName: request.PostForm.Get("connectwise_customer_name"),
+		Description:             strings.TrimSpace(request.PostForm.Get("description")),
+		Tags:                    strings.TrimSpace(request.PostForm.Get("tags")),
+		Networks:                strings.TrimSpace(request.PostForm.Get("networks")),
+		ScannerID:               request.PostForm.Get("scanner_id"),
+		ScanConfigID:            request.PostForm.Get("scan_config_id"),
+		PortListID:              request.PostForm.Get("port_list_id"),
+		Editing:                 existing != nil,
 	}
 	if len(form.Description) > 500 {
 		return customer.Customer{}, networkplan.Plan{}, form, errors.New("customer description must contain at most 500 characters")
 	}
-	if err := customer.ValidateCID(form.CID); err != nil {
+	if err := customer.ValidateConnectWiseCustomerName(form.ConnectWiseCustomerName); err != nil {
 		return customer.Customer{}, networkplan.Plan{}, form, err
 	}
 	tags, err := customer.NormalizeTags(form.Tags)
@@ -320,13 +320,13 @@ func (s *Server) customerFromForm(
 		return customer.Customer{}, networkplan.Plan{}, form, err
 	}
 	value := customer.Customer{
-		Name:        form.Name,
-		SafeName:    plan.CustomerKey,
-		CID:         form.CID,
-		Description: form.Description,
-		Tags:        tags,
-		Timezone:    settings.Timezone,
-		Networks:    make([]customer.Network, 0, len(inputs)),
+		Name:                    form.Name,
+		SafeName:                plan.CustomerKey,
+		ConnectWiseCustomerName: form.ConnectWiseCustomerName,
+		Description:             form.Description,
+		Tags:                    tags,
+		Timezone:                settings.Timezone,
+		Networks:                make([]customer.Network, 0, len(inputs)),
 	}
 	if existing == nil {
 		value.ID, err = id.New()
@@ -500,9 +500,16 @@ func buildChangePreview(existing *customer.Customer, desired customer.Customer, 
 		preview.Modifies++
 		preview.Unchanged--
 	}
-	if existing.CID != desired.CID {
+	if existing.ConnectWiseCustomerName != desired.ConnectWiseCustomerName {
 		preview.Modifies++
-		preview.Summaries = append(preview.Summaries, fmt.Sprintf("Hookwise CID: %q → %q", existing.CID, desired.CID))
+		preview.Summaries = append(
+			preview.Summaries,
+			fmt.Sprintf(
+				"ConnectWise Customer name: %q → %q",
+				existing.ConnectWiseCustomerName,
+				desired.ConnectWiseCustomerName,
+			),
+		)
 	}
 	preview.Summaries = append([]string{fmt.Sprintf("%d creates, %d changes, %d removals", preview.Creates, preview.Modifies, preview.Trashes)}, preview.Summaries...)
 	return preview

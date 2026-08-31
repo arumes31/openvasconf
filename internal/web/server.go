@@ -74,6 +74,8 @@ type hookwiseManager interface {
 	Save(ctx context.Context, enabled bool, endpoint, token string) error
 	Test(ctx context.Context) error
 	Retry(ctx context.Context) error
+	RetryFinding(ctx context.Context, customerID, taskID, fingerprint string) error
+	RecreateFinding(ctx context.Context, customerID, taskID, fingerprint string) error
 	Stats(ctx context.Context) (store.HookwiseStats, error)
 	Health(ctx context.Context) (state, detail, guidance, link string)
 }
@@ -274,6 +276,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /findings", s.requireAuth(http.HandlerFunc(s.findingsList)))
 	mux.Handle("GET /findings/export.json", s.requireAuth(http.HandlerFunc(s.findingsJSONExport)))
 	mux.Handle("POST /findings/state", s.requireAuth(http.HandlerFunc(s.findingStateUpdate)))
+	mux.Handle("POST /findings/ticket/retry", s.requireAuth(http.HandlerFunc(s.findingTicketRetry)))
+	mux.Handle("POST /findings/ticket/recreate", s.requireAuth(http.HandlerFunc(s.findingTicketRecreate)))
 	mux.Handle("POST /scan-alerts/{id}/acknowledge", s.requireAuth(http.HandlerFunc(s.scanAlertAcknowledge)))
 	mux.Handle("POST /reports/refresh", s.requireAuth(http.HandlerFunc(s.reportsRefresh)))
 	mux.Handle("GET /reports/compare", s.requireAuth(http.HandlerFunc(s.reportCompare)))

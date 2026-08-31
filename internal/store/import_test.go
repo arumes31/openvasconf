@@ -19,7 +19,7 @@ func TestStoreApplyImportCreatesAndUpdatesCustomers(t *testing.T) {
 	settings.Timezone = "UTC"
 	settings.SchedulePolicy = customer.SchedulePolicy{Weekdays: []int{1, 3, 5}, StartMinute: 60, EndMinute: 120}
 	value := testCustomer(t, "imported", []string{"10.40.0.0/24"})
-	value.CID = "customer_40"
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
 	value.Description = "created by import"
 	value.Tags = []string{"imported", "production"}
 	if err := database.ApplyImport(ctx, settings, []customer.Customer{value}); err != nil {
@@ -30,8 +30,18 @@ func TestStoreApplyImportCreatesAndUpdatesCustomers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.CID != value.CID || len(created.Networks) != 1 || created.DesiredRevision != 1 {
+	if created.ConnectWiseCustomerName != value.ConnectWiseCustomerName ||
+		len(created.Networks) != 1 || created.DesiredRevision != 1 {
 		t.Errorf("created customer = %#v", created)
+	}
+	var legacyCID string
+	if err := database.db.QueryRowContext(
+		ctx, "SELECT cid FROM customers WHERE id = ?", value.ID,
+	).Scan(&legacyCID); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCID != "" {
+		t.Errorf("new customer legacy cid = %q, want empty", legacyCID)
 	}
 	gotSettings, err := database.Settings(ctx)
 	if err != nil {
@@ -47,6 +57,11 @@ func TestStoreApplyImportCreatesAndUpdatesCustomers(t *testing.T) {
 	for index := range value.Networks {
 		value.Networks[index].CustomerID = value.ID
 	}
+	if _, err := database.db.ExecContext(
+		ctx, "UPDATE customers SET cid = ? WHERE id = ?", "legacy-cid", value.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.ApplyImport(ctx, settings, []customer.Customer{value}); err != nil {
 		t.Fatalf("ApplyImport(update) error = %v", err)
 	}
@@ -56,6 +71,14 @@ func TestStoreApplyImportCreatesAndUpdatesCustomers(t *testing.T) {
 	}
 	if updated.Name != value.Name || updated.Networks[0].Prefix != "7.7.7.8/32" || updated.DesiredRevision != 2 {
 		t.Errorf("updated customer = %#v", updated)
+	}
+	if err := database.db.QueryRowContext(
+		ctx, "SELECT cid FROM customers WHERE id = ?", value.ID,
+	).Scan(&legacyCID); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCID != "legacy-cid" {
+		t.Errorf("updated customer legacy cid = %q, want %q", legacyCID, "legacy-cid")
 	}
 }
 
@@ -76,9 +99,9 @@ func TestStoreApplyImportRollsBackInvalidInput(t *testing.T) {
 
 	settings.Timezone = "UTC"
 	value := testCustomer(t, "invalid-import", []string{"6.6.6.0/24"})
-	value.CID = "invalid cid"
+	value.ConnectWiseCustomerName = " invalid customer name"
 	if err := database.ApplyImport(ctx, settings, []customer.Customer{value}); err == nil {
-		t.Fatal("ApplyImport(invalid CID) error = nil")
+		t.Fatal("ApplyImport(invalid ConnectWise customer name) error = nil")
 	}
 	if _, err := database.Customer(ctx, value.ID); err == nil {
 		t.Fatal("invalid customer was committed")

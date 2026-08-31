@@ -323,6 +323,50 @@ func TestCustomerPreviewCreateAndSoftDelete(t *testing.T) {
 	}
 }
 
+func TestCustomerFormUsesConnectWiseCustomerName(t *testing.T) {
+	app := newTestWebApp(t)
+	login(t, app)
+
+	response, err := app.client.Get(app.server.URL + "/customers/new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, response)
+	for _, expected := range []string{
+		"ConnectWise Customer name",
+		"exact ConnectWise customer name",
+		"Sent to Hookwise as <code>connectwise_customer_name</code>",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("customer form does not contain %q", expected)
+		}
+	}
+	if strings.Contains(body, "Hookwise customer CID") {
+		t.Error("customer form still exposes Hookwise customer CID terminology")
+	}
+}
+
+func TestCustomerPreviewRejectsConnectWiseCustomerNameWhitespace(t *testing.T) {
+	app := newTestWebApp(t)
+	login(t, app)
+
+	response := postForm(t, app, "/customers/preview", url.Values{
+		"name":                      {"testcomp1"},
+		"connectwise_customer_name": {" Acme Europe GmbH"},
+		"networks":                  {"10.1.0.0/24"},
+	})
+	body := readBody(t, response)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("preview status = %d: %s", response.StatusCode, body)
+	}
+	if !strings.Contains(body, "connectwise customer name must not contain surrounding whitespace") {
+		t.Fatalf("preview did not reject surrounding whitespace: %s", body)
+	}
+	if strings.Contains(body, `name="preview_token"`) {
+		t.Fatal("preview token rendered for invalid ConnectWise customer name")
+	}
+}
+
 func TestJSONPreviewAndSettingsOverride(t *testing.T) {
 	app := newTestWebApp(t)
 	login(t, app)

@@ -17,16 +17,16 @@ const (
 // ScanAlert is one unacknowledged failed managed scan recorded in the
 // immutable audit journal.
 type ScanAlert struct {
-	ID           int64
-	CustomerID   string
-	CustomerName string
-	CID          string
-	TaskID       string
-	TaskName     string
-	ReportID     string
-	Status       string
-	Reason       string
-	DetectedAt   time.Time
+	ID                      int64
+	CustomerID              string
+	CustomerName            string
+	ConnectWiseCustomerName string
+	TaskID                  string
+	TaskName                string
+	ReportID                string
+	Status                  string
+	Reason                  string
+	DetectedAt              time.Time
 }
 
 type scanAlertDetail struct {
@@ -88,7 +88,8 @@ func (s *Store) OpenScanAlerts(ctx context.Context, limit int) ([]ScanAlert, err
 		limit = 20
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT failed.id, failed.customer_id, customer.name, customer.cid,
+		SELECT failed.id, failed.customer_id, customer.name,
+		       customer.connectwise_customer_name,
 		       failed.resource_name, failed.detail, failed.created_at
 		FROM audit_events failed
 		JOIN customers customer ON customer.id = failed.customer_id
@@ -117,7 +118,7 @@ func (s *Store) OpenScanAlerts(ctx context.Context, limit int) ([]ScanAlert, err
 			&alert.ID,
 			&alert.CustomerID,
 			&alert.CustomerName,
-			&alert.CID,
+			&alert.ConnectWiseCustomerName,
 			&alert.ReportID,
 			&detail,
 			&detectedAt,

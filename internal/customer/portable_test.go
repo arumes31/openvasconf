@@ -8,7 +8,7 @@ import (
 
 func validExportCustomer() ExportCustomer {
 	return ExportCustomer{
-		ID: "customer-1", CID: "cid_1", Name: "Example", Description: "description",
+		ID: "customer-1", ConnectWiseCustomerName: "Acme Europe GmbH", Name: "Example", Description: "description",
 		Tags: []string{"production"}, Networks: []string{"10.20.30.0/24"},
 		ScheduleWeekday: Monday, ScheduleMinute: 8 * 60, Timezone: "UTC",
 	}
@@ -32,7 +32,7 @@ func TestNewExportDocument(t *testing.T) {
 		Scanner:        Selection{ID: "scanner"}, ScanConfig: Selection{ID: "config"}, PortList: Selection{ID: "ports"},
 	}
 	customers := []Customer{{
-		ID: "id-1", CID: "cid-1", Name: "Example", Description: "desc", Tags: []string{"tag"},
+		ID: "id-1", ConnectWiseCustomerName: "Acme Europe GmbH", Name: "Example", Description: "desc", Tags: []string{"tag"},
 		ScheduleWeekday: 2, ScheduleMinute: 600, Timezone: "UTC",
 		ScannerID: "scanner-override", ScanConfigID: "config-override", PortListID: "ports-override",
 		Networks: []Network{{Prefix: "10.0.0.0/24"}},
@@ -53,7 +53,7 @@ func TestExportDocumentValidate(t *testing.T) {
 		name   string
 		mutate func(*ExportDocument)
 	}{
-		{name: "unsupported version", mutate: func(value *ExportDocument) { value.Version = 2 }},
+		{name: "unsupported version", mutate: func(value *ExportDocument) { value.Version = 1 }},
 		{name: "too many customers", mutate: func(value *ExportDocument) { value.Customers = make([]ExportCustomer, 501) }},
 		{name: "invalid timezone", mutate: func(value *ExportDocument) { value.Timezone = "invalid/timezone" }},
 		{name: "invalid policy", mutate: func(value *ExportDocument) { value.SchedulePolicy.Weekdays = nil }},
@@ -94,7 +94,9 @@ func TestExportCustomerValidate(t *testing.T) {
 		{name: "empty name", mutate: func(value *ExportCustomer) { value.Name = "" }},
 		{name: "long name", mutate: func(value *ExportCustomer) { value.Name = strings.Repeat("x", 101) }},
 		{name: "long description", mutate: func(value *ExportCustomer) { value.Description = strings.Repeat("x", 501) }},
-		{name: "invalid cid", mutate: func(value *ExportCustomer) { value.CID = "spaces rejected" }},
+		{name: "invalid ConnectWise customer name", mutate: func(value *ExportCustomer) {
+			value.ConnectWiseCustomerName = " leading whitespace"
+		}},
 		{name: "invalid tags", mutate: func(value *ExportCustomer) { value.Tags = []string{strings.Repeat("x", 31)} }},
 		{name: "no networks", mutate: func(value *ExportCustomer) { value.Networks = nil }},
 		{name: "too many networks", mutate: func(value *ExportCustomer) { value.Networks = make([]string, 2001) }},
@@ -117,16 +119,32 @@ func TestExportCustomerValidate(t *testing.T) {
 	}
 }
 
-func TestValidateCID(t *testing.T) {
+func TestValidateConnectWiseCustomerName(t *testing.T) {
 	t.Parallel()
 
-	if err := ValidateCID("Acme_42.eu:prod-west"); err != nil {
-		t.Fatalf("valid CID error = %v", err)
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "empty", value: ""},
+		{name: "spaces and punctuation", value: "Müller & Söhne (AT)"},
+		{name: "one hundred unicode characters", value: strings.Repeat("ü", 100)},
+		{name: "surrounding whitespace", value: " Acme Europe GmbH", wantErr: true},
+		{name: "control character", value: "Acme\nEurope", wantErr: true},
+		{name: "more than one hundred characters", value: strings.Repeat("x", 101), wantErr: true},
 	}
-	if err := ValidateCID(strings.Repeat("x", 101)); err == nil {
-		t.Error("long CID error = nil")
-	}
-	if err := ValidateCID("bad/cid"); err == nil {
-		t.Error("invalid character error = nil")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateConnectWiseCustomerName(test.value)
+			if (err != nil) != test.wantErr {
+				t.Errorf(
+					"ValidateConnectWiseCustomerName(%q) error = %v, wantErr %t",
+					test.value,
+					err,
+					test.wantErr,
+				)
+			}
+		})
 	}
 }

@@ -600,7 +600,9 @@ feeds, databases, scan data, and the `openvasconf` SQLite volume.
 [`Hookwise`](https://github.com/arumes31/hookwise) receives finding lifecycle
 events from `openvasconf` and creates, updates, or closes customer-routed
 ConnectWise Manage tickets. One global Hookwise endpoint is shared by all
-customers; the `cid` on each customer selects the ConnectWise company.
+customers. `openvasconf` emits each customer's exact ConnectWise customer name
+as the routing value, and Hookwise Customer Mapping associates that value with
+the intended Hookwise/ConnectWise customer.
 
 ### Ticket eligibility and lifecycle
 
@@ -611,7 +613,7 @@ Hookwise uses the final summary for duplicate detection and close-event lookup.
 | Current finding state | Ticket action |
 |---|---|
 | Present in the latest successful task snapshot, severity `>= 7.0`, active, and not resolved/wont-fix | Queue `state: open` if no open generation has been delivered. |
-| Eligible but customer CID is empty | Set ticket state to `blocked`; no webhook is sent. |
+| Eligible but ConnectWise customer name is empty | Set ticket state to `blocked`; no webhook is sent. |
 | Missing from the next successful snapshot of the same task | Queue `state: closed`. |
 | Severity drops below `7.0` | Queue `state: closed`. |
 | Marked resolved or wont-fix | Hide it from the current view and queue `state: closed`. |
@@ -659,8 +661,8 @@ select **New Endpoint** and use this recipe:
 |---|---|
 | Endpoint Name | `openvasconf findings` |
 | Service Board | The board that should receive vulnerability tickets. |
-| Priority | A valid priority on that ConnectWise installation. Hookwise may also derive it from the mapped severity. |
-| Default Company | Optional safety fallback. Normal routing uses `$.cid`; openvasconf blocks events without a CID before delivery. |
+| Priority | A valid default priority on that ConnectWise installation. The JSON mapping below overrides it with the named priority emitted in `$.severity`. |
+| Default Company | Optional safety fallback. Normal routing sends the exact name from `$.connectwise_customer_name` through Hookwise Customer Mapping; create an explicit mapping for every ticket-enabled customer. |
 | Initial Status | A valid open status on the selected board. |
 | Close Status | A valid closed status such as `Completed` or `Closed`. |
 | Summary Prefix | Keep stable after tickets are opened. Hookwise includes it in duplicate and close matching. |
@@ -682,10 +684,18 @@ Set **JSON Mapping** to:
 {
   "summary": "$.summary",
   "description": "$.description",
-  "customer_id": "$.cid",
-  "severity": "$.severity"
+  "customer_id": "$.connectwise_customer_name",
+  "severity": "$.severity",
+  "severitysource": "$.severitysource"
 }
 ```
+
+Hookwise calls its customer-routing target `customer_id`, while the source value
+is the exact ConnectWise customer name. In Hookwise **Customer Mapping**, map
+each emitted name to the intended Hookwise/ConnectWise customer. Keep this
+mapping stable for the full open/close lifecycle. `openvasconf` emits `P2-High`
+for severity `7.0` through `8.49` and `P1-Critical` for severity `8.5` and
+above. The original numeric score is retained in `severitysource`.
 
 Do not map the Hookwise summary from `$.title`. NVT titles may change between
 feed versions, whereas the `$.summary` emitted by openvasconf is deliberately
@@ -701,19 +711,24 @@ examples that use `/webhook/<id>`; current Hookwise routes and its endpoint form
 use `/w/<id>`. Token regeneration is immediate. If it is regenerated, update
 openvasconf before retrying queued events.
 
-### 3. Configure customer routing CIDs
+### 3. Configure customer routing
 
 For every customer that should create tickets:
 
 1. Open the customer in `openvasconf`.
-2. Set **Hookwise customer CID** to the exact ConnectWise company identifier,
-   not the local openvasconf UUID or display name.
+2. Set **ConnectWise Customer name** to the exact customer name shown in
+   ConnectWise. Do not enter the local openvasconf UUID.
 3. Review and confirm the customer change.
+4. In Hookwise **Customer Mapping**, map that exact name to the intended
+   Hookwise/ConnectWise customer.
 
-CIDs are optional globally, limited to 100 characters, and may contain letters,
-numbers, `.`, `_`, `:`, and `-`. An eligible High/Critical finding without a CID
-is retained with ticket state `blocked`. Adding the CID later causes the next
-ticket reconciliation pass to queue the open event; the finding is not lost.
+ConnectWise customer names are optional globally and limited to 100 Unicode
+characters. Spaces and punctuation are supported, but surrounding whitespace
+and control characters are rejected. An eligible High/Critical finding without
+a customer name is retained with ticket state `blocked`. Adding the name later
+causes the next ticket reconciliation pass to queue the open event; the finding
+is not lost. Hookwise must also have a matching customer mapping before it can
+route the queued event to the correct customer.
 
 ### 4. Connect openvasconf to Hookwise
 
@@ -744,7 +759,7 @@ An open event resembles:
 {
   "event_id": "customer-id:task-id:v1:fingerprint:1:open",
   "state": "open",
-  "cid": "CUSTOMER-CID",
+  "connectwise_customer_name": "Acme Europe GmbH",
   "finding_key": "customer-id:task-id:v1:fingerprint",
   "customer": "Example customer",
   "customer_id": "customer-id",
@@ -756,7 +771,8 @@ An open event resembles:
   "title": "Finding title",
   "host": "10.20.30.40",
   "port": "443/tcp",
-  "severity": 8.8,
+  "severity": "P1-Critical",
+  "severitysource": 8.8,
   "cves": ["CVE-2026-1234"],
   "remediation": "Install the fixed version",
   "resolution": "",
@@ -783,6 +799,10 @@ externally reachable URL.
 - The settings page shows pending, retrying, and last-delivered state. The
   Findings page shows `blocked`, `queued_open`, `open`, `queued_close`, `closed`,
   and `failed` per finding.
+- An `open` finding can be sent to Hookwise again with **Force recreate ticket**
+  when Hookwise accepted the original webhook but failed later in its
+  ConnectWise workflow. The action queues a fresh event and warns that it can
+  create a duplicate if the original ConnectWise ticket actually succeeded.
 - Rotating the bearer token does not rewrite queued payloads. Save the new token
   in openvasconf and then select **Retry failed events**.
 
@@ -799,10 +819,10 @@ processing failures.
 | `ticket integration incomplete` | Confirm the 32-byte deployment encryption key, endpoint URL, saved bearer token, and enabled checkbox. |
 | Connection test fails | Test DNS and TCP/TLS reachability from the openvasconf container; check the `/w/<id>` URL, bearer token, Hookwise trusted-IP rule, certificate chain, and redirects. |
 | Connection test creates a ticket | Add `connection_test` to Hookwise **Close Value** or add an equivalent drop routing rule for `$.state`. |
-| Finding shows `blocked` | Set a valid CID on the customer and save the reviewed customer change. |
+| Finding shows `blocked` | Set the exact ConnectWise customer name on the customer and save the reviewed customer change. |
 | Finding shows `failed` or settings show retrying events | Inspect openvasconf logs for HTTP status/diagnostic, correct the endpoint or token, then select **Retry failed events**. |
-| openvasconf says delivered but no ticket exists | Inspect Hookwise History and worker logs. A `2xx`/`202` only confirms ingestion; verify ConnectWise board, status, priority, company ID, and API permissions. |
-| Ticket is assigned to the wrong company | Ensure JSON mapping contains `"customer_id": "$.cid"` and the openvasconf CID exactly matches the ConnectWise company identifier. |
+| openvasconf says delivered but no ticket exists | Inspect Hookwise History and worker logs. A `2xx`/`202` only confirms ingestion; verify ConnectWise board, status, priority, Hookwise Customer Mapping, and API permissions. After confirming the original workflow failed and no ConnectWise ticket exists, use **Force recreate ticket** on the open finding. |
+| Ticket is assigned to the wrong company | Ensure JSON mapping contains `"customer_id": "$.connectwise_customer_name"`, the openvasconf value exactly matches the mapping key, and Hookwise Customer Mapping points that key to the intended customer. |
 | Ticket does not close | Verify trigger `$.state`, close value `closed`, a valid Hookwise Close Status, and an unchanged summary prefix. Check whether the ConnectWise ticket summary was edited manually. |
 | Duplicate tickets appear | Keep the JSON summary mapping and Hookwise prefix stable; verify Hookwise can still query the original open ticket. |
 | Stored token becomes undecryptable after restart | Restore the matching encryption key or enter the Hookwise token again under the new key and save. |

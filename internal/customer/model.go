@@ -11,7 +11,7 @@ type Customer struct {
 	ID                      string
 	Name                    string
 	SafeName                string
-	CID                     string
+	ConnectWiseCustomerName string
 	Description             string
 	Tags                    []string
 	ScheduleWeekday         int

@@ -11,7 +11,7 @@ func TestCurrentFindingsAreTaskScopedAndSuppressible(t *testing.T) {
 	ctx := t.Context()
 	repository := openTestStore(t)
 	value := testCustomer(t, "global-findings", []string{"10.55.0.1"})
-	value.CID = "cid-55"
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
 	if err := repository.CreateCustomer(ctx, value); err != nil {
 		t.Fatalf("CreateCustomer() error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestHookwiseTicketCloseTransitions(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			repository := openTestStore(t)
 			value := testCustomer(t, "ticket-transition", []string{"10.57.0.1"})
-			value.CID = "cid-57"
+			value.ConnectWiseCustomerName = "Acme Europe GmbH"
 			if err := repository.CreateCustomer(t.Context(), value); err != nil {
 				t.Fatalf("CreateCustomer() error = %v", err)
 			}
