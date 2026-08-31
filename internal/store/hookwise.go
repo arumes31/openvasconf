@@ -50,6 +50,13 @@ type ticketCandidate struct {
 	Generation       int
 }
 
+func connectWisePriority(severity float64) string {
+	if severity >= 8.5 {
+		return "P1-Critical"
+	}
+	return "P2-High"
+}
+
 // ReconcileHookwiseOutbox computes desired ticket transitions from current
 // task-scoped finding state. Unique event keys make repeated reconciliation
 // safe.
@@ -179,7 +186,8 @@ func enqueueHookwiseTx(
 		"title":             value.Title,
 		"host":              value.Host,
 		"port":              value.Port,
-		"severity":          value.Severity,
+		"severity":          connectWisePriority(value.Severity),
+		"severitysource":    value.Severity,
 		"cves":              splitCVEs(value.CVEs),
 		"remediation":       value.Remediation,
 		"resolution":        value.Justification,
