@@ -70,8 +70,9 @@ func (c *Client) Feeds(ctx context.Context) ([]Feed, error) {
 			Name             string `xml:"name"`
 			Version          string `xml:"version"`
 			Description      string `xml:"description"`
-			CurrentlySyncing string `xml:"currently_syncing"`
-			Timestamp        string `xml:"timestamp"`
+			CurrentlySyncing *struct {
+				Timestamp string `xml:"timestamp"`
+			} `xml:"currently_syncing"`
 		} `xml:"feed"`
 	}
 	if err := c.call(ctx, request, &response); err != nil {
@@ -87,9 +88,9 @@ func (c *Client) Feeds(ctx context.Context) ([]Feed, error) {
 			Name:             item.Name,
 			Version:          item.Version,
 			Description:      item.Description,
-			CurrentlySyncing: item.CurrentlySyncing == "1" || strings.EqualFold(item.CurrentlySyncing, "true"),
+			CurrentlySyncing: item.CurrentlySyncing != nil,
 		}
-		feed.UpdatedAt = parseGMPTime(item.Timestamp)
+		feed.UpdatedAt = parseGMPTime(item.Version)
 		feeds = append(feeds, feed)
 	}
 	return feeds, nil
@@ -316,7 +317,14 @@ func splitHosts(value string) []string {
 }
 
 func parseGMPTime(value string) time.Time {
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02 15:04:05"} {
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
+		"20060102150405",
+		"200601021504",
+		"20060102",
+	} {
 		parsed, err := time.Parse(layout, strings.TrimSpace(value))
 		if err == nil {
 			return parsed
