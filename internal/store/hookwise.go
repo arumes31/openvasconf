@@ -358,10 +358,14 @@ func (s *Store) RetryHookwiseFinding(
 		UPDATE hookwise_outbox SET next_attempt_at = ?, last_diagnostic = ''
 		WHERE state = 'pending' AND attempts > 0
 		  AND customer_id = ? AND task_id = ? AND fingerprint = ?
-		  AND generation = (
-			SELECT ticket_generation FROM finding_states
+		  AND EXISTS (
+			SELECT 1 FROM finding_states
 			WHERE customer_id = ? AND task_id = ? AND fingerprint = ?
 			  AND ticket_state = 'failed'
+			  AND ticket_generation = hookwise_outbox.generation
+			  AND hookwise_outbox.event_type = CASE
+				WHEN ticket_desired_open = 1 THEN 'open' ELSE 'closed'
+			  END
 		  )`,
 		nowText(), customerID, taskID, fingerprint,
 		customerID, taskID, fingerprint,

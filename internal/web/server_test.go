@@ -346,6 +346,27 @@ func TestCustomerFormUsesConnectWiseCustomerName(t *testing.T) {
 	}
 }
 
+func TestCustomerPreviewRejectsConnectWiseCustomerNameWhitespace(t *testing.T) {
+	app := newTestWebApp(t)
+	login(t, app)
+
+	response := postForm(t, app, "/customers/preview", url.Values{
+		"name":                      {"testcomp1"},
+		"connectwise_customer_name": {" Acme Europe GmbH"},
+		"networks":                  {"10.1.0.0/24"},
+	})
+	body := readBody(t, response)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("preview status = %d: %s", response.StatusCode, body)
+	}
+	if !strings.Contains(body, "connectwise customer name must not contain surrounding whitespace") {
+		t.Fatalf("preview did not reject surrounding whitespace: %s", body)
+	}
+	if strings.Contains(body, `name="preview_token"`) {
+		t.Fatal("preview token rendered for invalid ConnectWise customer name")
+	}
+}
+
 func TestJSONPreviewAndSettingsOverride(t *testing.T) {
 	app := newTestWebApp(t)
 	login(t, app)

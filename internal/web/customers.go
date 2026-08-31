@@ -276,17 +276,15 @@ func (s *Server) customerFromForm(
 	existing *customer.Customer,
 ) (customer.Customer, networkplan.Plan, customerForm, error) {
 	form := customerForm{
-		Name: strings.TrimSpace(request.PostForm.Get("name")),
-		ConnectWiseCustomerName: strings.TrimSpace(
-			request.PostForm.Get("connectwise_customer_name"),
-		),
-		Description:  strings.TrimSpace(request.PostForm.Get("description")),
-		Tags:         strings.TrimSpace(request.PostForm.Get("tags")),
-		Networks:     strings.TrimSpace(request.PostForm.Get("networks")),
-		ScannerID:    request.PostForm.Get("scanner_id"),
-		ScanConfigID: request.PostForm.Get("scan_config_id"),
-		PortListID:   request.PostForm.Get("port_list_id"),
-		Editing:      existing != nil,
+		Name:                    strings.TrimSpace(request.PostForm.Get("name")),
+		ConnectWiseCustomerName: request.PostForm.Get("connectwise_customer_name"),
+		Description:             strings.TrimSpace(request.PostForm.Get("description")),
+		Tags:                    strings.TrimSpace(request.PostForm.Get("tags")),
+		Networks:                strings.TrimSpace(request.PostForm.Get("networks")),
+		ScannerID:               request.PostForm.Get("scanner_id"),
+		ScanConfigID:            request.PostForm.Get("scan_config_id"),
+		PortListID:              request.PostForm.Get("port_list_id"),
+		Editing:                 existing != nil,
 	}
 	if len(form.Description) > 500 {
 		return customer.Customer{}, networkplan.Plan{}, form, errors.New("customer description must contain at most 500 characters")

@@ -110,14 +110,30 @@ func TestRetryHookwiseFindingRearmsOnlyFailedEvent(t *testing.T) {
 	}
 }
 
-func TestRetryHookwiseFindingIgnoresUnfailedSiblingEvent(t *testing.T) {
+func TestRetryHookwiseFindingIgnoresFailedSiblingEvent(t *testing.T) {
 	repository, fixture, openEvent := hookwiseRetryTestFixture(t)
 	closeFinding(t, repository, fixture.customerID, RemediationResolved)
 	if err := repository.ReconcileHookwiseOutbox(t.Context()); err != nil {
 		t.Fatalf("closing ReconcileHookwiseOutbox() error = %v", err)
 	}
+	events, err := repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("PendingHookwiseEvents() before failures = %#v, %v", events, err)
+	}
+	var closeEvent HookwiseEvent
+	for _, event := range events {
+		if event.EventType == "closed" {
+			closeEvent = event
+		}
+	}
+	if closeEvent.ID == 0 {
+		t.Fatalf("closed sibling event not found in %#v", events)
+	}
 	if err := repository.MarkHookwiseFailed(t.Context(), openEvent, 503, "upstream unavailable"); err != nil {
 		t.Fatalf("MarkHookwiseFailed() error = %v", err)
+	}
+	if err := repository.MarkHookwiseFailed(t.Context(), closeEvent, 503, "upstream unavailable"); err != nil {
+		t.Fatalf("MarkHookwiseFailed(closed) error = %v", err)
 	}
 
 	if err := repository.RetryHookwiseFinding(
@@ -125,11 +141,11 @@ func TestRetryHookwiseFindingIgnoresUnfailedSiblingEvent(t *testing.T) {
 	); err != nil {
 		t.Fatalf("RetryHookwiseFinding() error = %v", err)
 	}
-	events, err := repository.PendingHookwiseEvents(t.Context(), 10)
-	if err != nil || len(events) != 2 {
+	events, err = repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 {
 		t.Fatalf("PendingHookwiseEvents() = %#v, %v", events, err)
 	}
-	if events[0].ID != openEvent.ID || events[0].Attempts != 1 || events[1].Attempts != 0 {
+	if events[0].ID != closeEvent.ID || events[0].Attempts != 1 {
 		t.Fatalf("retried events = %#v", events)
 	}
 }

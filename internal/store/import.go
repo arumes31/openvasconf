@@ -41,7 +41,7 @@ func (s *Store) ApplyImport(
 		now := nowText()
 		result, err := tx.ExecContext(ctx, `
 			UPDATE customers SET name = ?, safe_name = ?,
-			       connectwise_customer_name = ?, cid = ?, description = ?, tags = ?,
+			       connectwise_customer_name = ?, description = ?, tags = ?,
 			       schedule_weekday = ?, schedule_minute = ?, timezone = ?,
 			       scanner_id = ?, scanner_name = ?, scan_config_id = ?, scan_config_name = ?,
 			       port_list_id = ?, port_list_name = ?, desired_revision = desired_revision + 1,
@@ -50,7 +50,6 @@ func (s *Store) ApplyImport(
 			WHERE id = ? AND deleted_at IS NULL`,
 			value.Name,
 			value.SafeName,
-			value.ConnectWiseCustomerName,
 			value.ConnectWiseCustomerName,
 			value.Description,
 			strings.Join(value.Tags, ","),
@@ -86,7 +85,7 @@ func (s *Store) ApplyImport(
 				value.Name,
 				value.SafeName,
 				value.ConnectWiseCustomerName,
-				value.ConnectWiseCustomerName,
+				"",
 				value.Description,
 				strings.Join(value.Tags, ","),
 				value.ScheduleWeekday,
