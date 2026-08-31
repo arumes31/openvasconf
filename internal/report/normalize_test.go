@@ -21,14 +21,22 @@ func TestNormalizeComputesTotalsFromFindings(t *testing.T) {
 		High: 99,
 		Results: []gmp.ReportResult{
 			{
-				NVTOID:   "oid-1",
-				NVTName:  "NVT one",
-				Host:     "10.0.0.1",
-				Port:     "22/tcp",
-				Threat:   "High",
-				Severity: 9.8,
-				QOD:      80,
-				CVEs:     []string{"CVE-2021-1234"},
+				NVTOID:       "oid-1",
+				NVTName:      "NVT one",
+				Host:         "10.0.0.1",
+				Port:         "22/tcp",
+				Threat:       "High",
+				Severity:     9.8,
+				QOD:          80,
+				CVEs:         []string{"CVE-2021-1234"},
+				Evidence:     "result evidence",
+				CVSSVector:   "AV:N/AC:L/Au:N/C:P/I:P/A:P",
+				Summary:      "NVT summary",
+				Insight:      "technical insight",
+				Impact:       "security impact",
+				Affected:     "affected product",
+				SolutionType: "VendorFix",
+				References:   []string{"url: https://greenbone.example/nvt"},
 			},
 			{
 				NVTOID:   "oid-2",
@@ -63,6 +71,16 @@ func TestNormalizeComputesTotalsFromFindings(t *testing.T) {
 	}
 	if findings[2].Threat != "Log" || findings[2].Title != "detection only" {
 		t.Errorf("derived threat/title = %#v", findings[2])
+	}
+	if findings[0].Evidence != "result evidence" ||
+		findings[0].CVSSVector != "AV:N/AC:L/Au:N/C:P/I:P/A:P" ||
+		findings[0].Summary != "NVT summary" ||
+		findings[0].Insight != "technical insight" ||
+		findings[0].Impact != "security impact" ||
+		findings[0].Affected != "affected product" ||
+		findings[0].SolutionType != "VendorFix" ||
+		len(findings[0].References) != 1 {
+		t.Errorf("normalized Greenbone metadata = %#v", findings[0])
 	}
 }
 

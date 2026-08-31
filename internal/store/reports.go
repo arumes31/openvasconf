@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -44,19 +45,27 @@ type ReportSnapshot struct {
 
 // FindingSnapshot is one normalized finding row of a report snapshot.
 type FindingSnapshot struct {
-	ID          int64
-	SnapshotID  int64
-	Fingerprint string
-	NVTOID      string
-	Title       string
-	Host        string
-	Port        string
-	Location    string
-	Severity    float64
-	Threat      string
-	QOD         int
-	CVEs        []string
-	Remediation string
+	ID           int64
+	SnapshotID   int64
+	Fingerprint  string
+	NVTOID       string
+	Title        string
+	Host         string
+	Port         string
+	Location     string
+	Severity     float64
+	Threat       string
+	QOD          int
+	CVEs         []string
+	Remediation  string
+	Evidence     string
+	CVSSVector   string
+	Summary      string
+	Insight      string
+	Impact       string
+	Affected     string
+	SolutionType string
+	References   []string
 }
 
 // ReportImportStats summarizes report import activity for the health strip.
@@ -403,7 +412,9 @@ func (s *Store) ReportFindings(
 ) ([]FindingSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, snapshot_id, fingerprint, nvt_oid, title, host, port,
-		       location, severity, threat, qod, cves, remediation
+		       location, severity, threat, qod, cves, remediation,
+		       evidence, cvss_vector, summary, insight, impact, affected,
+		       solution_type, nvt_references
 		FROM finding_snapshots
 		WHERE snapshot_id = ?
 		ORDER BY severity DESC, host, title`,
@@ -415,7 +426,7 @@ func (s *Store) ReportFindings(
 	result := make([]FindingSnapshot, 0)
 	for rows.Next() {
 		var finding FindingSnapshot
-		var cves string
+		var cves, references string
 		if err := rows.Scan(
 			&finding.ID,
 			&finding.SnapshotID,
@@ -430,11 +441,22 @@ func (s *Store) ReportFindings(
 			&finding.QOD,
 			&cves,
 			&finding.Remediation,
+			&finding.Evidence,
+			&finding.CVSSVector,
+			&finding.Summary,
+			&finding.Insight,
+			&finding.Impact,
+			&finding.Affected,
+			&finding.SolutionType,
+			&references,
 		); err != nil {
 			return nil, closeRows(rows, "finding snapshots query", fmt.Errorf("scanning finding snapshot: %w", err))
 		}
 		if cves != "" {
 			finding.CVEs = strings.Split(cves, ",")
+		}
+		if err := json.Unmarshal([]byte(references), &finding.References); err != nil {
+			return nil, closeRows(rows, "finding snapshots query", fmt.Errorf("decoding finding references: %w", err))
 		}
 		result = append(result, finding)
 	}
@@ -535,8 +557,8 @@ func (s *Store) ReportImportStats(ctx context.Context) (ReportImportStats, error
 }
 
 // findingInsertChunk bounds the multi-row finding INSERT so the parameter
-// count (12 columns × chunk) stays below every SQLite variable limit.
-const findingInsertChunk = 50
+// count (20 columns × chunk) stays below SQLite's portable variable limit.
+const findingInsertChunk = 40
 
 // insertFindingChunk inserts one batch of findings with a single multi-row
 // INSERT statement inside the snapshot transaction.
@@ -547,9 +569,17 @@ func insertFindingChunk(
 	findings []FindingSnapshot,
 ) error {
 	placeholders := make([]string, len(findings))
-	arguments := make([]any, 0, len(findings)*12)
+	arguments := make([]any, 0, len(findings)*20)
 	for index, finding := range findings {
-		placeholders[index] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+		references := finding.References
+		if references == nil {
+			references = []string{}
+		}
+		encodedReferences, err := json.Marshal(references)
+		if err != nil {
+			return fmt.Errorf("encoding finding references: %w", err)
+		}
+		placeholders[index] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 		arguments = append(arguments,
 			snapshotID,
 			finding.Fingerprint,
@@ -563,6 +593,14 @@ func insertFindingChunk(
 			finding.QOD,
 			strings.Join(finding.CVEs, ","),
 			finding.Remediation,
+			finding.Evidence,
+			finding.CVSSVector,
+			finding.Summary,
+			finding.Insight,
+			finding.Impact,
+			finding.Affected,
+			finding.SolutionType,
+			string(encodedReferences),
 		)
 	}
 	// The only generated SQL fragments are fixed "(?,...,?)" tuples; all
@@ -571,7 +609,9 @@ func insertFindingChunk(
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO finding_snapshots(
 			snapshot_id, fingerprint, nvt_oid, title, host, port,
-			location, severity, threat, qod, cves, remediation
+			location, severity, threat, qod, cves, remediation,
+			evidence, cvss_vector, summary, insight, impact, affected,
+			solution_type, nvt_references
 		) VALUES `+strings.Join(placeholders, ","),
 		arguments...,
 	); err != nil {

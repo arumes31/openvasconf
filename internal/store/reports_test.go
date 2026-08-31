@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -54,16 +55,24 @@ func testSnapshot(customerID string) ReportSnapshot {
 func testFindings() []FindingSnapshot {
 	return []FindingSnapshot{
 		{
-			Fingerprint: "v1:aaa",
-			NVTOID:      "1.3.6.1.4.1.25623.1.0.100001",
-			Title:       "OpenSSH Weak Encryption",
-			Host:        "10.1.0.5",
-			Port:        "22/tcp",
-			Severity:    9.8,
-			Threat:      "High",
-			QOD:         80,
-			CVEs:        []string{"CVE-2021-1234", "CVE-2021-5678"},
-			Remediation: "Update OpenSSH",
+			Fingerprint:  "v1:aaa",
+			NVTOID:       "1.3.6.1.4.1.25623.1.0.100001",
+			Title:        "OpenSSH Weak Encryption",
+			Host:         "10.1.0.5",
+			Port:         "22/tcp",
+			Severity:     9.8,
+			Threat:       "High",
+			QOD:          80,
+			CVEs:         []string{"CVE-2021-1234", "CVE-2021-5678"},
+			Remediation:  "Update OpenSSH",
+			Evidence:     "The SSH service advertises weak algorithms.",
+			CVSSVector:   "AV:N/AC:L/Au:N/C:P/I:P/A:P",
+			Summary:      "Weak algorithms are enabled.",
+			Insight:      "The remote banner lists legacy ciphers.",
+			Impact:       "Transport confidentiality may be weakened.",
+			Affected:     "OpenSSH before the fixed release.",
+			SolutionType: "VendorFix",
+			References:   []string{"url: https://greenbone.example/nvt"},
 		},
 		{
 			Fingerprint: "v1:bbb",
@@ -134,6 +143,45 @@ func TestReportSnapshotRoundTrip(t *testing.T) {
 	}
 	if len(findings[0].CVEs) != 2 || findings[0].CVEs[1] != "CVE-2021-5678" {
 		t.Errorf("finding cves = %#v", findings[0].CVEs)
+	}
+	if findings[0].Evidence != "The SSH service advertises weak algorithms." ||
+		findings[0].CVSSVector != "AV:N/AC:L/Au:N/C:P/I:P/A:P" ||
+		findings[0].Summary != "Weak algorithms are enabled." ||
+		findings[0].Insight != "The remote banner lists legacy ciphers." ||
+		findings[0].Impact != "Transport confidentiality may be weakened." ||
+		findings[0].Affected != "OpenSSH before the fixed release." ||
+		findings[0].SolutionType != "VendorFix" ||
+		len(findings[0].References) != 1 ||
+		findings[0].References[0] != "url: https://greenbone.example/nvt" {
+		t.Errorf("finding Greenbone metadata = %#v", findings[0])
+	}
+}
+
+func TestSaveReportSnapshotEnrichedFindingsCrossInsertChunkBoundary(t *testing.T) {
+	t.Parallel()
+
+	repository := openTestStore(t)
+	findings := make([]FindingSnapshot, findingInsertChunk+1)
+	for index := range findings {
+		findings[index] = FindingSnapshot{
+			Fingerprint: fmt.Sprintf("v1:chunk-%d", index),
+			Title:       fmt.Sprintf("Finding %d", index),
+			Host:        "10.1.0.5",
+			Severity:    8.0,
+			Evidence:    "Greenbone result evidence",
+			References:  []string{"url: https://greenbone.example/nvt"},
+		}
+	}
+	if err := repository.SaveReportSnapshot(t.Context(), testSnapshot(""), findings); err != nil {
+		t.Fatalf("SaveReportSnapshot() error = %v", err)
+	}
+	snapshots, err := repository.ListReportSnapshots(t.Context(), "", 10)
+	if err != nil || len(snapshots) != 1 {
+		t.Fatalf("ListReportSnapshots() = %#v, %v", snapshots, err)
+	}
+	stored, err := repository.ReportFindings(t.Context(), snapshots[0].ID)
+	if err != nil || len(stored) != len(findings) {
+		t.Fatalf("ReportFindings() count = %d, %v", len(stored), err)
 	}
 }
 

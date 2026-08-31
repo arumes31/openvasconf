@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openvasconf/internal/customer"
@@ -276,6 +278,88 @@ func TestConnectWiseCustomerNameMigrationBackfillsCID(t *testing.T) {
 		t.Errorf("migration version = %d, want 8", version)
 	}
 	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGreenboneFindingDetailsMigrationPreservesLegacyRows(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "greenbone-details-upgrade.db")
+	dsn := "file:" + url.PathEscape(filepath.ToSlash(path)) + "?_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	legacy := &Store{db: db}
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for version := 1; version <= 8; version++ {
+		var name string
+		prefix := fmt.Sprintf("%03d_", version)
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				name = entry.Name()
+				break
+			}
+		}
+		if name == "" {
+			t.Fatalf("migration %d not found", version)
+		}
+		statement, readErr := migrationFiles.ReadFile("migrations/" + name)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err := legacy.applyMigration(ctx, version, string(statement)); err != nil {
+			t.Fatalf("applyMigration(%d) error = %v", version, err)
+		}
+	}
+	const storedTime = "2026-08-31T15:00:00.000000000Z"
+	result, err := db.ExecContext(ctx, `
+		INSERT INTO report_snapshots(
+			report_id, task_id, task_name, import_state, created_at
+		) VALUES('legacy-report', 'legacy-task', 'Legacy task', 'imported', ?)`, storedTime)
+	if err != nil {
+		t.Fatalf("seeding legacy report: %v", err)
+	}
+	snapshotID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO finding_snapshots(snapshot_id, fingerprint, title, cves, remediation)
+		VALUES(?, 'v1:legacy', 'Legacy finding', 'CVE-2026-1234', 'Legacy fix')`, snapshotID); err != nil {
+		t.Fatalf("seeding legacy finding: %v", err)
+	}
+	migration, err := migrationFiles.ReadFile("migrations/009_greenbone_finding_details.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.applyMigration(ctx, 9, string(migration)); err != nil {
+		t.Fatalf("applyMigration(9) error = %v", err)
+	}
+	var title, evidence, cvssVector, summary, insight, impact, affected, solutionType, references string
+	if err := db.QueryRowContext(ctx, `
+		SELECT title, evidence, cvss_vector, summary, insight, impact, affected,
+		       solution_type, nvt_references
+		FROM finding_snapshots WHERE fingerprint = 'v1:legacy'`).Scan(
+		&title, &evidence, &cvssVector, &summary, &insight, &impact, &affected,
+		&solutionType, &references,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if title != "Legacy finding" || evidence != "" || cvssVector != "" ||
+		summary != "" || insight != "" || impact != "" || affected != "" ||
+		solutionType != "" || references != "[]" {
+		t.Errorf("migrated finding = %q %q %q %q %q %q %q %q %q",
+			title, evidence, cvssVector, summary, insight, impact, affected, solutionType, references)
+	}
+	var version int
+	if err := db.QueryRowContext(ctx, "SELECT version FROM schema_migrations WHERE version = 9").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
 }

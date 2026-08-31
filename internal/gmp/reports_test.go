@@ -31,7 +31,10 @@ const testReportXML = `<get_reports_response status="200" status_text="OK">` +
 	`<name>OpenSSH Weak Encryption Algorithms</name>` +
 	`<tags>cvss_base_vector=AV:N/AC:L/Au:N/C:P/I:P/A:P|` +
 	`solution=Update OpenSSH to the latest available version|` +
-	`cve=CVE-2021-1234, CVE-2021-5678|summary=weak ciphers</tags>` +
+	`solution_type=VendorFix|cve=CVE-2021-1234, CVE-2021-5678|` +
+	`summary=Weak ciphers are enabled|insight=The SSH service advertises legacy algorithms|` +
+	`impact=An attacker can weaken transport confidentiality|` +
+	`affected=OpenSSH before the vendor-fixed release</tags>` +
 	`<refs><ref type="cve" id="CVE-2021-5678"/>` +
 	`<ref type="cve" id="CVE-2024-9999"/><ref type="url" id="https://example.invalid"/></refs>` +
 	`</nvt>` +
@@ -97,6 +100,18 @@ func TestClientReportParsesStreamedResults(t *testing.T) {
 	}
 	if first.Remediation != "Update OpenSSH to the latest available version" {
 		t.Errorf("remediation = %q", first.Remediation)
+	}
+	if first.Evidence != "The remote SSH server supports weak encryption algorithms." ||
+		first.CVSSVector != "AV:N/AC:L/Au:N/C:P/I:P/A:P" ||
+		first.Summary != "Weak ciphers are enabled" ||
+		first.Insight != "The SSH service advertises legacy algorithms" ||
+		first.Impact != "An attacker can weaken transport confidentiality" ||
+		first.Affected != "OpenSSH before the vendor-fixed release" ||
+		first.SolutionType != "VendorFix" {
+		t.Errorf("Greenbone metadata = %#v", first)
+	}
+	if len(first.References) != 1 || first.References[0] != "url: https://example.invalid" {
+		t.Errorf("references = %#v", first.References)
 	}
 
 	second := report.Results[1]

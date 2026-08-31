@@ -11,9 +11,19 @@ import (
 	"time"
 )
 
-// maxRemediationLength caps the normalized remediation summary stored per
-// result; longer vendor texts are truncated.
-const maxRemediationLength = 2000
+const (
+	// Greenbone feed and result text is bounded before it is persisted or sent
+	// to downstream ticket systems. The complete report response is already
+	// protected by ReportLimits; these per-field caps prevent one verbose NVT
+	// from dominating a ticket or database row.
+	maxRemediationLength = 2000
+	maxEvidenceLength    = 4000
+	maxNVTSummaryLength  = 2000
+	maxNVTDetailLength   = 4000
+	maxNVTShortLength    = 500
+	maxNVTReferenceID    = 1000
+	maxNVTReferences     = 20
+)
 
 // ReportLimits bounds one report fetch. MaxBytes caps the raw XML stream and
 // MaxResults caps the number of parsed results; both are enforced while
@@ -25,18 +35,26 @@ type ReportLimits struct {
 
 // ReportResult is one normalized result row of a report.
 type ReportResult struct {
-	ID          string
-	Name        string
-	NVTOID      string
-	NVTName     string
-	Host        string
-	Port        string
-	Location    string
-	Threat      string
-	Severity    float64
-	QOD         int
-	CVEs        []string
-	Remediation string
+	ID           string
+	Name         string
+	NVTOID       string
+	NVTName      string
+	Host         string
+	Port         string
+	Location     string
+	Threat       string
+	Severity     float64
+	QOD          int
+	CVEs         []string
+	Remediation  string
+	Evidence     string
+	CVSSVector   string
+	Summary      string
+	Insight      string
+	Impact       string
+	Affected     string
+	SolutionType string
+	References   []string
 }
 
 // ReportDetails is the normalized view of one Greenbone report. The raw
@@ -257,6 +275,7 @@ type resultWire struct {
 	QOD         string `xml:"qod>value"`
 	Description string `xml:"description"`
 	Solution    struct {
+		Type string `xml:"type,attr"`
 		Text string `xml:",chardata"`
 	} `xml:"solution"`
 }
@@ -267,18 +286,27 @@ type nvtReference struct {
 }
 
 func (wire resultWire) normalize() ReportResult {
+	tags := parseNVtTags(wire.NVT.Tags)
 	result := ReportResult{
-		ID:          wire.ID,
-		Name:        wire.Name,
-		NVTOID:      wire.NVT.OID,
-		NVTName:     wire.NVT.Name,
-		Host:        strings.TrimSpace(wire.Host),
-		Port:        wire.Port,
-		Location:    wire.Location,
-		Threat:      wire.Threat,
-		Severity:    parseFloat(wire.Severity),
-		QOD:         parseInteger(wire.QOD),
-		Remediation: remediation(wire),
+		ID:           wire.ID,
+		Name:         wire.Name,
+		NVTOID:       wire.NVT.OID,
+		NVTName:      wire.NVT.Name,
+		Host:         strings.TrimSpace(wire.Host),
+		Port:         strings.TrimSpace(wire.Port),
+		Location:     boundedText(wire.Location, maxNVTShortLength),
+		Threat:       strings.TrimSpace(wire.Threat),
+		Severity:     parseFloat(wire.Severity),
+		QOD:          parseInteger(wire.QOD),
+		Remediation:  remediation(wire),
+		Evidence:     boundedText(wire.Description, maxEvidenceLength),
+		CVSSVector:   boundedText(tags["cvss_base_vector"], maxNVTShortLength),
+		Summary:      boundedText(tags["summary"], maxNVTSummaryLength),
+		Insight:      boundedText(tags["insight"], maxNVTDetailLength),
+		Impact:       boundedText(tags["impact"], maxNVTDetailLength),
+		Affected:     boundedText(tags["affected"], maxNVTDetailLength),
+		SolutionType: boundedText(solutionType(tags, wire.Solution.Type), maxNVTShortLength),
+		References:   nvtReferences(wire.NVT.References),
 	}
 	result.CVEs = cveReferences(wire.NVT.Tags, wire.NVT.References)
 	return result
@@ -294,9 +322,52 @@ func remediation(wire resultWire) string {
 	} else {
 		value = strings.TrimSpace(wire.Solution.Text)
 	}
+	return boundedText(value, maxRemediationLength)
+}
+
+func solutionType(tags map[string]string, fallback string) string {
+	if value := strings.TrimSpace(tags["solution_type"]); value != "" {
+		return value
+	}
+	return fallback
+}
+
+// nvtReferences retains non-CVE Greenbone references in a compact stable
+// representation. CVEs have their own normalized field and are not duplicated.
+func nvtReferences(references []nvtReference) []string {
+	result := make([]string, 0, min(len(references), maxNVTReferences))
+	seen := make(map[string]struct{})
+	for _, reference := range references {
+		kind := strings.ToLower(boundedText(reference.Type, maxNVTShortLength))
+		identifier := boundedText(reference.ID, maxNVTReferenceID)
+		if kind == "" || identifier == "" || kind == "cve" {
+			continue
+		}
+		value := kind + ": " + identifier
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+		if len(result) == maxNVTReferences {
+			break
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func boundedText(value string, maxRunes int) string {
+	value = strings.TrimSpace(value)
+	if maxRunes <= 0 {
+		return ""
+	}
 	runes := []rune(value)
-	if len(runes) > maxRemediationLength {
-		value = string(runes[:maxRemediationLength])
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
 	}
 	return value
 }

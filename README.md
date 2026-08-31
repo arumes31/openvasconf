@@ -544,7 +544,11 @@ daemons to finish importing the data. Do not combine this with a separate
 tasks and imports normalized, immutable snapshots (findings, severities, and
 metadata); raw report XML is discarded after parsing and never stored. Imports
 are transactional and idempotent per Greenbone report ID, with bounded retries
-for failures.
+for failures. Each finding snapshot retains the bounded Greenbone result
+evidence and NVT metadata needed for investigation: OID, QoD, CVEs, CVSS base
+vector, summary, insight, impact, affected products, solution type, remediation,
+and non-CVE references. This data comes from the report returned by the local
+`gvmd` container; `openvasconf` does not query third-party vulnerability APIs.
 
 The **Reports** pages show per-scan severity distribution, finding counts, and
 severity trends, and classify findings as new, recurring, or resolved against
@@ -602,7 +606,10 @@ events from `openvasconf` and creates, updates, or closes customer-routed
 ConnectWise Manage tickets. One global Hookwise endpoint is shared by all
 customers. `openvasconf` emits each customer's exact ConnectWise customer name
 as the routing value, and Hookwise Customer Mapping associates that value with
-the intended Hookwise/ConnectWise customer.
+the intended Hookwise/ConnectWise customer. Ticket enrichment uses only the
+immutable Greenbone report snapshot imported over the shared GMP socket. No CVE,
+asset, customer, or ticket data is sent to NVD, CISA, EPSS, or another external
+enrichment service.
 
 ### Ticket eligibility and lifecycle
 
@@ -774,12 +781,42 @@ An open event resembles:
   "severity": "P1-Critical",
   "severitysource": 8.8,
   "cves": ["CVE-2026-1234"],
+  "nvt_oid": "1.3.6.1.4.1.25623.1.0.100001",
+  "threat": "High",
+  "qod": 80,
+  "location": "HTTPS service",
+  "cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+  "nvt_summary": "The service is affected by a known vulnerability.",
+  "evidence": "The scanner observed the affected service version.",
+  "insight": "Greenbone NVT technical detail.",
+  "impact": "Successful exploitation can compromise the service.",
+  "affected": "Product versions before the vendor-fixed release.",
   "remediation": "Install the fixed version",
+  "solution_type": "VendorFix",
+  "references": ["url: https://greenbone.example/reference"],
+  "greenbone_report_id": "greenbone-report-uuid",
+  "scan_end": "2026-08-31T13:45:00.000000000Z",
   "resolution": "",
   "remediation_state": "open",
   "report_path": "/reports/123"
 }
 ```
+
+The mapped `description` is assembled into readable **Risk details**,
+**Evidence**, **Technical insight**, **Impact**, **Affected**, **Remediation**,
+**References**, and **Greenbone context** sections. Empty fields are omitted
+from that text. The structured fields remain available for additional Hookwise
+mapping or workflow rules. `severitysource` is Greenbone's numeric CVSS score;
+it describes technical severity, not customer-specific business risk. QoD is
+Greenbone's quality-of-detection percentage.
+
+Greenbone feeds and individual NVTs do not always populate every optional
+field. CVE-less checks, configuration findings, and detection NVTs can therefore
+have an empty `cves`, `cvss_vector`, `impact`, or `references` value. The ticket
+still includes the finding title, score, asset, remediation when available, NVT
+OID, report ID, and scan completion time. Existing outbox events are immutable;
+events queued before an upgrade retain their original payload, while events
+created from newly imported reports use the enriched format.
 
 A close event uses the same stable finding identity and summary, changes
 `state` to `closed`, and includes the current resolution/remediation state.
