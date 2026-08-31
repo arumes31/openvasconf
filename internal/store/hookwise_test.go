@@ -53,6 +53,7 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 		t.Fatalf("PendingHookwiseEvents() = %#v, %v", events, err)
 	}
 	var payload struct {
+		Summary           string   `json:"summary"`
 		Description       string   `json:"description"`
 		NVTOID            string   `json:"nvt_oid"`
 		Threat            string   `json:"threat"`
@@ -75,6 +76,11 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 	for _, expected := range []string{
 		"Risk details", "CVSS score: 9.8", "CVSS vector: AV:N/AC:L/Au:N/C:P/I:P/A:P",
 		"Quality of detection: 80%", "CVEs: CVE-2021-1234, CVE-2024-9999",
+		"CVE references",
+		"CVE.org: https://www.cve.org/CVERecord?id=CVE-2021-1234",
+		"NVD: https://nvd.nist.gov/vuln/detail/CVE-2021-1234",
+		"CVE.org: https://www.cve.org/CVERecord?id=CVE-2024-9999",
+		"NVD: https://nvd.nist.gov/vuln/detail/CVE-2024-9999",
 		"Evidence", finding.Evidence, "Technical insight", finding.Insight,
 		"Impact", finding.Impact, "Affected", finding.Affected,
 		"Remediation", finding.Remediation, "Greenbone context", finding.NVTOID,
@@ -82,6 +88,12 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 		if !strings.Contains(payload.Description, expected) {
 			t.Errorf("description missing %q:\n%s", expected, payload.Description)
 		}
+	}
+	if !strings.HasPrefix(payload.Summary, "CVE-2021-1234 S:9.8 - ") {
+		t.Errorf("summary = %q, want CVE and score prefix", payload.Summary)
+	}
+	if length := len([]rune(payload.Summary)); length > maxHookwiseMappedSummaryLength {
+		t.Errorf("summary length = %d, want <= %d", length, maxHookwiseMappedSummaryLength)
 	}
 	if payload.NVTOID != finding.NVTOID || payload.Threat != finding.Threat ||
 		payload.QOD != finding.QOD || payload.Location != finding.Location ||
@@ -91,6 +103,41 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 		payload.SolutionType != finding.SolutionType || len(payload.References) != 1 ||
 		payload.GreenboneReportID != snapshot.ReportID || payload.ScanEnd == "" {
 		t.Errorf("structured Greenbone payload = %#v", payload)
+	}
+}
+
+func TestHookwiseCVETitleAndLinksIgnoreInvalidIdentifiers(t *testing.T) {
+	value := ticketCandidate{
+		Fingerprint: "v1:cve-links", Title: "Example finding", Host: "192.0.2.5",
+		Port: "443/tcp", Severity: 7.6, CustomerName: "Customer", TaskName: "Task",
+		CVEs: "not-a-cve,CVE-2024-12345,cve-2024-12345,CVE-2023-0001/path",
+	}
+
+	summary := newHookwiseSummary(value)
+	if !strings.HasPrefix(summary, "CVE-2024-12345 S:7.6 - ") {
+		t.Errorf("newHookwiseSummary() = %q, want normalized CVE and score prefix", summary)
+	}
+	description := hookwiseDescription(value)
+	if count := strings.Count(description, "https://www.cve.org/CVERecord?id=CVE-2024-12345"); count != 1 {
+		t.Errorf("CVE.org valid-link count = %d, want 1:\n%s", count, description)
+	}
+	if count := strings.Count(description, "https://nvd.nist.gov/vuln/detail/CVE-2024-12345"); count != 1 {
+		t.Errorf("NVD valid-link count = %d, want 1:\n%s", count, description)
+	}
+	for _, unexpected := range []string{"not-a-cve", "CVE-2023-0001/path"} {
+		if strings.Contains(description, "https://nvd.nist.gov/vuln/detail/"+unexpected) {
+			t.Errorf("description contains link for invalid identifier %q", unexpected)
+		}
+	}
+}
+
+func TestHookwiseSummaryIncludesScoreWithoutCVE(t *testing.T) {
+	summary := newHookwiseSummary(ticketCandidate{
+		Fingerprint: "v1:score-only", Title: "SNMP default community",
+		Host: "192.0.2.10", Port: "161/udp", Severity: 7.6,
+	})
+	if !strings.HasPrefix(summary, "S:7.6 - SNMP default community") {
+		t.Errorf("newHookwiseSummary() = %q, want score prefix", summary)
 	}
 }
 
@@ -113,6 +160,78 @@ func TestHookwiseDescriptionBoundsVerboseGreenboneSections(t *testing.T) {
 		if !strings.Contains(description, expected) {
 			t.Errorf("bounded description missing %q", expected)
 		}
+	}
+}
+
+func TestHookwiseSummaryIsReadableAndStableAcrossTitleChanges(t *testing.T) {
+	repository := openTestStore(t)
+	value := testCustomer(t, "stable-summary", []string{"10.61.0.1"})
+	value.ConnectWiseCustomerName = "Acme Europe GmbH"
+	if err := repository.CreateCustomer(t.Context(), value); err != nil {
+		t.Fatalf("CreateCustomer() error = %v", err)
+	}
+	firstEnd := time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC)
+	firstSnapshot := ReportSnapshot{
+		ReportID: "summary-report-1", TaskID: "task-1", TaskName: "Private scan",
+		CustomerID: value.ID, ScanEnd: firstEnd, Status: "Done",
+	}
+	finding := FindingSnapshot{
+		Fingerprint: "v1:stable-summary", Title: "OpenSSH Weak Encryption",
+		Host: "10.61.0.5", Port: "22/tcp", Severity: 9.0, Threat: "High",
+	}
+	if err := repository.SaveReportSnapshot(t.Context(), firstSnapshot, []FindingSnapshot{finding}); err != nil {
+		t.Fatalf("SaveReportSnapshot(first) error = %v", err)
+	}
+	if err := repository.UpdateHookwiseSettings(t.Context(), customer.HookwiseSettings{
+		Enabled: true, Endpoint: "https://hookwise.test/webhook", TokenCipher: "cipher",
+	}); err != nil {
+		t.Fatalf("UpdateHookwiseSettings() error = %v", err)
+	}
+	if err := repository.ReconcileHookwiseOutbox(t.Context()); err != nil {
+		t.Fatalf("ReconcileHookwiseOutbox(open) error = %v", err)
+	}
+	events, err := repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("PendingHookwiseEvents(open) = %#v, %v", events, err)
+	}
+	var openPayload struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(events[0].Payload, &openPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(openPayload.Summary, finding.Title) ||
+		!strings.Contains(openPayload.Summary, finding.Host+":"+finding.Port) ||
+		!strings.Contains(openPayload.Summary, "v1:stable-su") {
+		t.Fatalf("readable open summary = %q", openPayload.Summary)
+	}
+	if err := repository.MarkHookwiseDelivered(t.Context(), events[0], 202); err != nil {
+		t.Fatalf("MarkHookwiseDelivered() error = %v", err)
+	}
+
+	secondSnapshot := firstSnapshot
+	secondSnapshot.ReportID = "summary-report-2"
+	secondSnapshot.ScanEnd = firstEnd.Add(time.Hour)
+	finding.Title = "Renamed by a later Greenbone feed"
+	finding.Severity = 6.9
+	if err := repository.SaveReportSnapshot(t.Context(), secondSnapshot, []FindingSnapshot{finding}); err != nil {
+		t.Fatalf("SaveReportSnapshot(second) error = %v", err)
+	}
+	if err := repository.ReconcileHookwiseOutbox(t.Context()); err != nil {
+		t.Fatalf("ReconcileHookwiseOutbox(closed) error = %v", err)
+	}
+	events, err = repository.PendingHookwiseEvents(t.Context(), 10)
+	if err != nil || len(events) != 1 || events[0].EventType != "closed" {
+		t.Fatalf("PendingHookwiseEvents(closed) = %#v, %v", events, err)
+	}
+	var closePayload struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(events[0].Payload, &closePayload); err != nil {
+		t.Fatal(err)
+	}
+	if closePayload.Summary != openPayload.Summary {
+		t.Errorf("close summary = %q, want original %q", closePayload.Summary, openPayload.Summary)
 	}
 }
 

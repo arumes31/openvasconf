@@ -387,9 +387,11 @@ td progress { max-width: 120px; }
 .empty-state > strong { color: var(--signal); font: 700 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 
 .event-list { margin: 0; padding: 0; list-style: none; }
-.event-list li { display: grid; grid-template-columns: 150px 100px 100px minmax(0, 1fr); gap: 14px; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.event-list li { display: grid; grid-template-columns: 150px minmax(190px, .7fr) minmax(100px, .35fr) minmax(0, 3fr); gap: 14px; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.event-list li > * { min-width: 0; }
+.event-list li > :last-child { overflow-wrap: anywhere; }
 .event-list time { color: var(--paper-dim); }
-.event-action { color: var(--signal); font: 10px var(--mono); text-transform: uppercase; }
+.event-action { overflow-wrap: anywhere; color: var(--signal); font: 10px var(--mono); text-transform: uppercase; }
 
 .editor-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .75fr); gap: 12px; align-items: start; }
 .schedule-chip { display: grid; grid-template-columns: auto auto; gap: 2px 10px; min-width: 230px; padding: 9px 12px; border-left: 3px solid var(--signal); background: var(--signal-dim); }

@@ -188,13 +188,13 @@ func enqueueHookwiseTx(
 	generation int,
 ) error {
 	findingKey := value.CustomerID + ":" + value.TaskID + ":" + value.Fingerprint
-	shortKey := value.Fingerprint
-	if len(shortKey) > 12 {
-		shortKey = shortKey[:12]
+	// Hookwise deduplicates and closes by summary. New generations get a readable
+	// title; close events reuse the exact summary stored in that generation's
+	// open payload so a later Greenbone title change cannot break matching.
+	summary, err := hookwiseSummaryTx(ctx, tx, value, eventType, generation)
+	if err != nil {
+		return err
 	}
-	// Hookwise deduplicates by summary, so it must use only fingerprint-stable
-	// fields. The mutable NVT title remains available in the payload/body.
-	summary := fmt.Sprintf("[OpenVAS] Finding %s on %s:%s", shortKey, value.Host, value.Port)
 	description := hookwiseDescription(value)
 	payload, err := json.Marshal(map[string]any{
 		"event_id":                  fmt.Sprintf("%s:%d:%s", findingKey, generation, eventType),
@@ -265,6 +265,65 @@ func enqueueHookwiseTx(
 	return nil
 }
 
+const (
+	maxHookwiseMappedSummaryLength = 90
+	maxHookwiseCVEReferences       = 20
+)
+
+func hookwiseSummaryTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	value ticketCandidate,
+	eventType string,
+	generation int,
+) (string, error) {
+	if eventType == "closed" {
+		var encoded []byte
+		err := tx.QueryRowContext(ctx, `
+			SELECT payload FROM hookwise_outbox
+			WHERE customer_id = ? AND task_id = ? AND fingerprint = ?
+			  AND generation = ? AND event_type = 'open'
+			ORDER BY id DESC LIMIT 1`,
+			value.CustomerID, value.TaskID, value.Fingerprint, generation,
+		).Scan(&encoded)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("loading open Hookwise summary: %w", err)
+		}
+		if err == nil {
+			var openPayload struct {
+				Summary string `json:"summary"`
+			}
+			if json.Unmarshal(encoded, &openPayload) == nil && strings.TrimSpace(openPayload.Summary) != "" {
+				return openPayload.Summary, nil
+			}
+		}
+	}
+	return newHookwiseSummary(value), nil
+}
+
+func newHookwiseSummary(value ticketCandidate) string {
+	shortKey := value.Fingerprint
+	if len(shortKey) > 12 {
+		shortKey = shortKey[:12]
+	}
+	asset := boundedTicketText(value.Host+":"+value.Port, 48)
+	suffix := " on " + asset + " [" + shortKey + "]"
+	title := strings.TrimSpace(value.Title)
+	if title == "" {
+		title = "Security finding"
+	}
+	prefix := fmt.Sprintf("S:%.1f - ", value.Severity)
+	if cves := normalizedCVEs(value.CVEs); len(cves) > 0 {
+		prefix = cves[0] + " " + prefix
+	}
+	title = prefix + title
+	available := maxHookwiseMappedSummaryLength - len([]rune(suffix))
+	if available < 1 {
+		return boundedTicketText("Finding ["+shortKey+"]", maxHookwiseMappedSummaryLength)
+	}
+	return boundedTicketText(title, available) + suffix
+}
+
 const maxHookwiseDescriptionLength = 12000
 
 func hookwiseDescription(value ticketCandidate) string {
@@ -286,6 +345,9 @@ func hookwiseDescription(value ticketCandidate) string {
 		risk = append(risk, "CVEs: "+strings.Join(cves, ", "))
 	}
 	sections = append(sections, "Risk details\n"+boundedTicketText(strings.Join(risk, "\n"), 1600))
+	if references := hookwiseCVEReferences(value.CVEs); references != "" {
+		sections = append(sections, "CVE references\n"+references)
+	}
 	appendSection := func(heading, content string, limit int) {
 		if content = boundedTicketText(content, limit); content != "" {
 			sections = append(sections, heading+"\n"+content)
@@ -331,6 +393,62 @@ func hookwiseDescription(value ticketCandidate) string {
 		description = string(runes[:maxHookwiseDescriptionLength])
 	}
 	return description
+}
+
+func hookwiseCVEReferences(value string) string {
+	cves := normalizedCVEs(value)
+	omitted := 0
+	if len(cves) > maxHookwiseCVEReferences {
+		omitted = len(cves) - maxHookwiseCVEReferences
+		cves = cves[:maxHookwiseCVEReferences]
+	}
+	lines := make([]string, 0, len(cves)*3+1)
+	for _, cve := range cves {
+		lines = append(
+			lines,
+			cve,
+			"CVE.org: https://www.cve.org/CVERecord?id="+cve,
+			"NVD: https://nvd.nist.gov/vuln/detail/"+cve,
+		)
+	}
+	if omitted > 0 {
+		lines = append(lines, fmt.Sprintf("%d additional CVE(s) omitted", omitted))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func normalizedCVEs(value string) []string {
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, candidate := range splitCVEs(value) {
+		cve := strings.ToUpper(strings.TrimSpace(candidate))
+		if !validCVE(cve) {
+			continue
+		}
+		if _, exists := seen[cve]; exists {
+			continue
+		}
+		seen[cve] = struct{}{}
+		result = append(result, cve)
+	}
+	return result
+}
+
+func validCVE(value string) bool {
+	parts := strings.Split(value, "-")
+	if len(parts) != 3 || parts[0] != "CVE" || len(parts[1]) != 4 || len(parts[2]) < 4 {
+		return false
+	}
+	return decimalDigits(parts[1]) && decimalDigits(parts[2])
+}
+
+func decimalDigits(value string) bool {
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return value != ""
 }
 
 func boundedTicketText(value string, maxRunes int) string {
