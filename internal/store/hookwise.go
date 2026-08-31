@@ -335,6 +335,39 @@ func (s *Store) RetryHookwiseEvents(ctx context.Context) error {
 	return nil
 }
 
+// RetryHookwiseFinding makes the failed event for one finding immediately
+// eligible without creating a second ticket lifecycle event.
+func (s *Store) RetryHookwiseFinding(
+	ctx context.Context,
+	customerID,
+	taskID,
+	fingerprint string,
+) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE hookwise_outbox SET next_attempt_at = ?, last_diagnostic = ''
+		WHERE state = 'pending' AND attempts > 0
+		  AND customer_id = ? AND task_id = ? AND fingerprint = ?
+		  AND generation = (
+			SELECT ticket_generation FROM finding_states
+			WHERE customer_id = ? AND task_id = ? AND fingerprint = ?
+			  AND ticket_state = 'failed'
+		  )`,
+		nowText(), customerID, taskID, fingerprint,
+		customerID, taskID, fingerprint,
+	)
+	if err != nil {
+		return fmt.Errorf("rearming hookwise finding event: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rearmed hookwise finding event: %w", err)
+	}
+	if rows < 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) HookwiseStats(ctx context.Context) (HookwiseStats, error) {
 	var result HookwiseStats
 	var lastDelivered string

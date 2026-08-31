@@ -221,3 +221,26 @@ func (s *Server) findingStateUpdate(response http.ResponseWriter, request *http.
 	}
 	http.Redirect(response, request, redirect, http.StatusSeeOther)
 }
+
+func (s *Server) findingTicketRetry(response http.ResponseWriter, request *http.Request) {
+	if s.hookwise == nil {
+		http.Error(response, "ticket integration unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	customerID := strings.TrimSpace(request.PostForm.Get("customer_id"))
+	taskID := strings.TrimSpace(request.PostForm.Get("task_id"))
+	fingerprint := strings.TrimSpace(request.PostForm.Get("fingerprint"))
+	if customerID == "" || taskID == "" || fingerprint == "" {
+		http.Error(response, "finding identity is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.hookwise.RetryFinding(request.Context(), customerID, taskID, fingerprint); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(response, "finding ticket is not retryable", http.StatusConflict)
+			return
+		}
+		s.internalError(response, err)
+		return
+	}
+	http.Redirect(response, request, "/findings?notice=ticket-retry-requested", http.StatusSeeOther)
+}
