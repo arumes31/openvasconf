@@ -11,17 +11,29 @@ func TestClientFeeds(t *testing.T) {
 	t.Parallel()
 
 	client := fakeClient(t, []string{`<get_feeds_response status="200" status_text="OK">
-		<feed><type>NVT</type><name>Greenbone Community Feed</name><version>20260828</version>
-		<description>Vulnerability tests</description><currently_syncing>true</currently_syncing>
-		<timestamp>2026-08-28T10:11:12Z</timestamp></feed>
-		<feed><type>SCAP</type><name>SCAP</name><currently_syncing>0</currently_syncing><timestamp>invalid</timestamp></feed>
+		<feed_owner_set>1</feed_owner_set><feed_roles_set>1</feed_roles_set><feed_resources_access>1</feed_resources_access>
+		<feed><type>NVT</type><name>Greenbone Community Feed</name><version>20260828101112</version>
+		<description>Vulnerability tests</description><currently_syncing><timestamp>2026-08-28T10:11:12Z</timestamp></currently_syncing></feed>
+		<feed><type>SCAP</type><name>SCAP</name><version>202608270930</version><description>SCAP data</description></feed>
 		</get_feeds_response>`}, nil)
 	feeds, err := client.Feeds(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(feeds) != 2 || !feeds[0].CurrentlySyncing || feeds[0].UpdatedAt.IsZero() || feeds[1].CurrentlySyncing || !feeds[1].UpdatedAt.IsZero() {
-		t.Fatalf("feeds = %#v", feeds)
+	if len(feeds) != 2 {
+		t.Fatalf("len(feeds) = %d, want 2", len(feeds))
+	}
+	if !feeds[0].CurrentlySyncing {
+		t.Errorf("NVT CurrentlySyncing = false, want true")
+	}
+	if want := time.Date(2026, 8, 28, 10, 11, 12, 0, time.UTC); !feeds[0].UpdatedAt.Equal(want) {
+		t.Errorf("NVT UpdatedAt = %v, want %v", feeds[0].UpdatedAt, want)
+	}
+	if feeds[1].CurrentlySyncing {
+		t.Errorf("SCAP CurrentlySyncing = true, want false")
+	}
+	if want := time.Date(2026, 8, 27, 9, 30, 0, 0, time.UTC); !feeds[1].UpdatedAt.Equal(want) {
+		t.Errorf("SCAP UpdatedAt = %v, want %v", feeds[1].UpdatedAt, want)
 	}
 }
 
@@ -127,10 +139,24 @@ func TestOperationParsingHelpers(t *testing.T) {
 	if hosts := splitHosts("   "); len(hosts) != 0 {
 		t.Errorf("splitHosts(empty) = %#v", hosts)
 	}
-	if got := parseGMPTime("2026-08-28T10:00:00Z"); got.Equal(time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)) == false {
-		t.Errorf("parseGMPTime() = %v", got)
+	tests := []struct {
+		name  string
+		value string
+		want  time.Time
+	}{
+		{name: "RFC 3339", value: "2026-08-28T10:00:00Z", want: time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)},
+		{name: "compact seconds", value: "20260828101112", want: time.Date(2026, 8, 28, 10, 11, 12, 0, time.UTC)},
+		{name: "compact minutes", value: "202608281011", want: time.Date(2026, 8, 28, 10, 11, 0, 0, time.UTC)},
+		{name: "compact date", value: "20260828", want: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC)},
+		{name: "invalid", value: "invalid"},
 	}
-	if got := parseGMPTime("invalid"); !got.IsZero() {
-		t.Errorf("parseGMPTime(invalid) = %v", got)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseGMPTime(test.value)
+			if !got.Equal(test.want) {
+				t.Errorf("parseGMPTime(%q) = %v, want %v", test.value, got, test.want)
+			}
+		})
 	}
 }
