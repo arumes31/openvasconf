@@ -1,33 +1,34 @@
 {{template "head" .}}
-<section class="hero-row">
-  <div><p class="eyebrow">CURRENT OPERATING PICTURE</p><h1>Scan operations</h1></div>
-  <div class="button-row"><form method="post" action="/sync"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="primary" type="submit">Synchronize all <span>↻</span></button></form></div>
+<section class="hero-row" aria-labelledby="operations-title">
+  <div class="page-title"><p class="eyebrow">CURRENT OPERATING PICTURE</p><h1 id="operations-title">Scan operations</h1></div>
+  <div class="button-row"><form method="post" action="/sync"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="primary" type="submit">Synchronize all</button></form></div>
 </section>
 
-<section class="overview-grid" data-operations-url="/api/operations">
-  <article class="metric"><span>Visible customers</span><strong>{{len .Customers}}</strong><small>filtered tenants</small></article>
-  <article class="metric"><span>GMP link</span><strong class="compact">{{if .GreenboneVersion}}ONLINE{{else}}OFFLINE{{end}}</strong><small>{{if .GreenboneVersion}}version {{.GreenboneVersion}}{{else}}check socket{{end}}</small></article>
-  <article class="metric"><span>Default policy</span><strong class="compact">{{if .Settings.ScanConfig.Name}}{{.Settings.ScanConfig.Name}}{{else}}PENDING{{end}}</strong><small>{{.Settings.PortList.Name}}</small></article>
-  <article class="metric live-metric"><span>GMP latency</span><strong class="compact" data-op-latency>Loading…</strong><small>live response</small></article>
-  <article class="metric live-metric"><span>Active scans</span><strong data-op-active>—</strong><small data-op-task>Querying task state</small><small data-op-recent></small></article>
-  <article class="metric live-metric"><span>Feed health</span><strong data-op-feeds>—</strong><small data-op-feed-age>Querying feed versions</small></article>
-  <article class="metric live-metric"><span>Update control</span><strong class="compact">{{if and .UpdateStatus .UpdateStatus.Available}}{{if .UpdateStatus.Active}}{{.UpdateStatus.Active.State}}{{else}}READY{{end}}{{else}}OFFLINE{{end}}</strong><small>{{if and .UpdateStatus .UpdateStatus.NextFeedAt}}Feed {{.UpdateStatus.NextFeedAt.Format "Mon 15:04"}}{{else}}Helper unavailable{{end}}</small></article>
+<section class="overview-grid" aria-label="Operations summary" data-operations-url="/api/operations">
+  <article class="metric metric-active live-metric"><span>Active scans</span><strong data-op-active aria-live="polite">Pending</strong><div class="metric-detail"><small data-op-task>Querying task state</small><small data-op-recent></small></div></article>
+  <article class="metric metric-feeds live-metric"><span>Feed health</span><strong data-op-feeds aria-live="polite">Pending</strong><small data-op-feed-age>Querying feed versions</small></article>
+  <article class="metric metric-link"><span>GMP link</span><strong class="compact">{{if .GreenboneVersion}}ONLINE{{else}}OFFLINE{{end}}</strong><small>{{if .GreenboneVersion}}Version {{.GreenboneVersion}}{{else}}Check socket{{end}}</small></article>
+  <article class="metric metric-latency live-metric"><span>GMP latency</span><strong class="compact" data-op-latency aria-live="polite">Pending</strong><small>Live response</small></article>
+  <article class="metric metric-customers"><span>Visible customers</span><strong>{{len .Customers}}</strong><small>Filtered tenants</small></article>
+  <article class="metric metric-policy"><span>Default policy</span><strong class="compact">{{if .Settings.ScanConfig.Name}}{{.Settings.ScanConfig.Name}}{{else}}PENDING{{end}}</strong><small>{{.Settings.PortList.Name}}</small></article>
+  <article class="metric metric-update live-metric"><span>Update control</span><strong class="compact">{{if and .UpdateStatus .UpdateStatus.Available}}{{if .UpdateStatus.Active}}{{.UpdateStatus.Active.State}}{{else}}READY{{end}}{{else}}OFFLINE{{end}}</strong><small>{{if and .UpdateStatus .UpdateStatus.NextFeedAt}}Feed {{.UpdateStatus.NextFeedAt.Format "Mon 15:04"}}{{else}}Helper unavailable{{end}}</small></article>
 </section>
 {{if or (not .Settings.Scanner.ID) (not .Settings.ScanConfig.ID) (not .Settings.PortList.ID)}}<p class="alert alert-warn"><span>DEFAULTS</span>Required scanner, scan configuration, or port-list defaults are missing. <a href="/settings">Configure Greenbone objects.</a></p>{{end}}
 
-<section class="panel table-panel">
-  <div class="section-heading"><div><p class="eyebrow">MANAGED TENANTS</p><h2>Customers</h2></div><div class="button-row"><a class="secondary" href="/import">Import / export</a><a class="secondary" href="/customers/new">+ Add customer</a></div></div>
+<section class="panel table-panel" aria-labelledby="customers-title">
+  <div class="section-heading"><div class="section-title"><h2 id="customers-title">Customers</h2><span class="result-count">{{len .Customers}} visible</span></div><div class="button-row"><a class="secondary" href="/import">Import / export</a><a class="secondary" href="/customers/new">Add customer</a></div></div>
   <form method="get" action="/" class="filter-bar">
     <label>Search<input type="search" name="q" value="{{.Query.Search}}" placeholder="name, description, tag"></label>
     <label>State<select name="status"><option value="">All states</option>{{range $s := (list "pending" "syncing" "applied" "error")}}<option value="{{$s}}" {{if selected $.Query.Status $s}}selected{{end}}>{{$s}}</option>{{end}}</select></label>
     <label>Sort<select name="sort"><option value="name" {{if selected .Query.Sort "name"}}selected{{end}}>Name</option><option value="status" {{if selected .Query.Sort "status"}}selected{{end}}>State</option><option value="next_scan" {{if selected .Query.Sort "next_scan"}}selected{{end}}>Weekly slot</option><option value="updated_at" {{if selected .Query.Sort "updated_at"}}selected{{end}}>Modified</option></select></label>
     <label>Order<select name="order"><option value="asc">Ascending</option><option value="desc" {{if .Query.Descending}}selected{{end}}>Descending</option></select></label>
-    <button class="secondary" type="submit">Apply</button>
+    <button class="secondary" type="submit">Apply filters</button>
   </form>
   <form id="bulk-sync" method="post" action="/sync-selected"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"></form>
   {{if .Customers}}
-  <div class="bulk-row"><button class="secondary" form="bulk-sync" type="submit">Synchronize selected</button><small>Selection is limited to this filtered view.</small></div>
+  <div class="bulk-row" role="toolbar" aria-label="Customer selection actions"><button class="secondary" form="bulk-sync" type="submit">Synchronize selected</button><small>Selection is limited to this filtered view.</small></div>
   <div class="table-scroll"><table class="customer-table">
+    <caption class="sr-only">Customers in the current filtered operations view</caption>
     <thead><tr><th><span class="sr-only">Select</span></th><th>Customer</th><th>Scope</th><th>Next weekly scan</th><th>Desired / applied / remote</th><th>Progress</th><th>Actions</th></tr></thead>
     <tbody>{{range .Customers}}
       <tr data-customer-id="{{.ID}}">
@@ -41,8 +42,8 @@
       </tr>
     {{end}}</tbody>
   </table></div>
-  {{else}}<div class="empty-state"><span>NO MATCHING CUSTOMER OBJECTS</span><p>Add a customer or clear the current filters.</p></div>{{end}}
+  {{else}}<div class="empty-state" role="status"><strong>No matching customers</strong><p>Add a customer or clear the current filters.</p></div>{{end}}
 </section>
 
-<section class="panel activity-panel"><div class="section-heading"><div><p class="eyebrow">IMMUTABLE TRACE</p><h2>Recent activity</h2></div></div>{{if .Events}}<ol class="event-list">{{range .Events}}<li><time>{{.CreatedAt.Format "2006-01-02 15:04"}}</time><span class="event-action">{{.Action}}</span><strong>{{.ResourceKind}}</strong><span>{{.ResourceName}}</span></li>{{end}}</ol>{{else}}<p class="muted">No reconciliation activity recorded yet.</p>{{end}}</section>
+<section class="panel activity-panel" aria-labelledby="activity-title"><div class="section-heading"><h2 id="activity-title">Recent activity</h2></div>{{if .Events}}<ol class="event-list">{{range .Events}}<li><time>{{.CreatedAt.Format "2006-01-02 15:04"}}</time><span class="event-action">{{.Action}}</span><strong>{{.ResourceKind}}</strong><span>{{.ResourceName}}</span></li>{{end}}</ol>{{else}}<p class="muted">No reconciliation activity recorded yet.</p>{{end}}</section>
 {{template "foot" .}}

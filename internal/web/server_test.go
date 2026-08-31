@@ -181,6 +181,32 @@ func TestLoginCSRFAndSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestDashboardRendersAccessibleOperationsLayout(t *testing.T) {
+	app := newTestWebApp(t)
+	login(t, app)
+
+	response, err := app.client.Get(app.server.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, response)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("dashboard status = %d: %s", response.StatusCode, body)
+	}
+
+	for _, expected := range []string{
+		`<section class="hero-row" aria-labelledby="operations-title">`,
+		`<h1 id="operations-title">Scan operations</h1>`,
+		`<section class="overview-grid" aria-label="Operations summary"`,
+		`<span class="result-count">0 visible</span>`,
+		`class="health-component"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("dashboard does not contain %q", expected)
+		}
+	}
+}
+
 func TestCookieSecurityPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -422,6 +448,20 @@ func TestUpdaterJavaScriptUsesAdaptivePolling(t *testing.T) {
 		"visibilitychange",
 		"data-update-phase-start",
 	} {
+		if !strings.Contains(script, expected) {
+			t.Errorf("app.js does not contain %q", expected)
+		}
+	}
+}
+
+func TestJavaScriptMarksActiveNavigation(t *testing.T) {
+	t.Parallel()
+	contents, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	for _, expected := range []string{"window.location.pathname", `aria-current`, "primary-nav"} {
 		if !strings.Contains(script, expected) {
 			t.Errorf("app.js does not contain %q", expected)
 		}

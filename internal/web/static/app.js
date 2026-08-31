@@ -5,6 +5,14 @@ document.addEventListener("submit", (event) => {
   if (message && !window.confirm(message)) event.preventDefault();
 });
 
+const currentPath = window.location.pathname;
+document.querySelectorAll(".primary-nav a").forEach((link) => {
+  const linkPath = new URL(link.href, window.location.origin).pathname;
+  const customerDetail = linkPath === "/" && currentPath.startsWith("/customers/") && currentPath !== "/customers/new";
+  const nestedPage = linkPath !== "/" && linkPath !== "/customers/new" && currentPath.startsWith(`${linkPath}/`);
+  if (currentPath === linkPath || customerDetail || nestedPage) link.setAttribute("aria-current", "page");
+});
+
 const densityToggle = document.querySelector("[data-density-toggle]");
 if (densityToggle) {
   const applyComfortable = (enabled) => {
@@ -63,14 +71,14 @@ if (operationsPanel) {
       setText("[data-op-latency]", `${Math.round(data.latency_ns / 1000000)} ms`);
       setText("[data-op-active]", String(data.active_tasks.length));
       const current = data.active_tasks[0];
-      setText("[data-op-task]", current ? `${current.name} · ${current.status} · ${current.progress}%` : "No scans currently running");
-	  const latest = data.tasks.find((task) => task.last_report);
-	  setText("[data-op-recent]", latest ? `Latest: ${latest.name} · ${latest.status} · severity ${latest.last_report.severity}` : "No completed report returned");
+      setText("[data-op-task]", current ? `${current.name} / ${current.status} / ${current.progress}%` : "No scans currently running");
+      const latest = data.tasks.find((task) => task.last_report);
+      setText("[data-op-recent]", latest ? `Latest: ${latest.name} / ${latest.status} / severity ${latest.last_report.severity}` : "No completed report returned");
       setText("[data-op-feeds]", String(data.feeds.length));
-	  const versions = data.feeds.map((feed) => {
-	    const age = feed.updated_at ? Math.floor((Date.now() - Date.parse(feed.updated_at)) / 86400000) : null;
-	    return `${feed.name}: ${feed.version || "unknown"}${age === null ? "" : ` (${age}d old)`}`;
-	  }).join(" · ");
+      const versions = data.feeds.map((feed) => {
+        const age = feed.updated_at ? Math.floor((Date.now() - Date.parse(feed.updated_at)) / 86400000) : null;
+        return `${feed.name}: ${feed.version || "unknown"}${age === null ? "" : ` (${age}d old)`}`;
+      }).join(" / ");
       setText("[data-op-feed-age]", versions || "No feed records returned");
     })
     .catch((error) => {

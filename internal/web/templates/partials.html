@@ -9,6 +9,7 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div class="scanline" aria-hidden="true"></div>
 {{if .Authenticated}}
 <header class="masthead">
@@ -24,9 +25,10 @@
   </nav>
   <div class="command-cluster">
     {{if .Health}}<details class="health-strip health-{{.Health.Level}}" aria-label="System health">
-      <summary><span class="health-light" aria-hidden="true"></span><strong>{{.Health.Summary}}</strong><small>{{.Health.CheckedAt.Format "15:04"}}</small></summary>
-      <div class="health-popover"><div class="popover-heading">System components · checked {{.Health.CheckedAt.Format "15:04:05"}}</div>
-        <ul class="health-list">{{range .Health.Components}}<li><span class="status health-state-{{.State}}">{{.State}}</span><strong>{{.Name}}</strong><span>{{.Detail}}</span>{{if .Guidance}}<small>{{.Guidance}}</small>{{end}}{{if .Link}}<a href="{{.Link}}">Details →</a>{{end}}</li>{{end}}</ul>
+      <summary><span class="health-light" aria-hidden="true"></span><span class="health-summary"><strong>{{.Health.Summary}}</strong><small>Checked {{.Health.CheckedAt.Format "15:04"}}</small></span></summary>
+      <div class="health-popover">
+        <div class="popover-heading"><strong>System health</strong><time datetime="{{.Health.CheckedAt.Format "2006-01-02T15:04:05Z07:00"}}">Checked {{.Health.CheckedAt.Format "15:04:05"}}</time></div>
+        <ul class="health-list">{{range .Health.Components}}<li class="health-component"><span class="status health-state-{{.State}}">{{.State}}</span><div class="health-component-copy"><strong>{{.Name}}</strong><span>{{.Detail}}</span>{{if .Guidance}}<small>{{.Guidance}}</small>{{end}}</div>{{if .Link}}<a class="health-component-link" href="{{.Link}}">View details</a>{{end}}</li>{{end}}</ul>
       </div>
     </details>{{end}}
     <button class="text-button density-toggle" type="button" data-density-toggle aria-pressed="false">Relax density</button>
@@ -37,7 +39,7 @@
   </div>
 </header>
 {{end}}
-<main class="shell">
+<main class="shell" id="main-content" tabindex="-1">
 {{range .ScanAlerts}}<div class="alert alert-error scan-alert" role="alert"><span>SCAN FAILED</span><div><strong>{{.CustomerName}}</strong>{{if .CID}} · CID {{.CID}}{{end}} · {{.TaskName}}<small>{{.Reason}} · {{.DetectedAt.Format "2006-01-02 15:04 MST"}}</small></div><form method="post" action="/scan-alerts/{{.ID}}/acknowledge"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="text-button" type="submit">Acknowledge</button></form></div>{{end}}
 {{if .Error}}<div class="alert alert-error" role="alert"><span>FAULT</span>{{.Error}}</div>{{end}}
 {{if .Notice}}<div class="alert"><span>INFO</span>{{.Notice}}</div>{{end}}
