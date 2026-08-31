@@ -53,6 +53,7 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 		t.Fatalf("PendingHookwiseEvents() = %#v, %v", events, err)
 	}
 	var payload struct {
+		Summary           string   `json:"summary"`
 		Description       string   `json:"description"`
 		NVTOID            string   `json:"nvt_oid"`
 		Threat            string   `json:"threat"`
@@ -75,6 +76,11 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 	for _, expected := range []string{
 		"Risk details", "CVSS score: 9.8", "CVSS vector: AV:N/AC:L/Au:N/C:P/I:P/A:P",
 		"Quality of detection: 80%", "CVEs: CVE-2021-1234, CVE-2024-9999",
+		"CVE references",
+		"CVE.org: https://www.cve.org/CVERecord?id=CVE-2021-1234",
+		"NVD: https://nvd.nist.gov/vuln/detail/CVE-2021-1234",
+		"CVE.org: https://www.cve.org/CVERecord?id=CVE-2024-9999",
+		"NVD: https://nvd.nist.gov/vuln/detail/CVE-2024-9999",
 		"Evidence", finding.Evidence, "Technical insight", finding.Insight,
 		"Impact", finding.Impact, "Affected", finding.Affected,
 		"Remediation", finding.Remediation, "Greenbone context", finding.NVTOID,
@@ -82,6 +88,12 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 		if !strings.Contains(payload.Description, expected) {
 			t.Errorf("description missing %q:\n%s", expected, payload.Description)
 		}
+	}
+	if !strings.HasPrefix(payload.Summary, "CVE-2021-1234 S:9.8 - ") {
+		t.Errorf("summary = %q, want CVE and score prefix", payload.Summary)
+	}
+	if length := len([]rune(payload.Summary)); length > maxHookwiseMappedSummaryLength {
+		t.Errorf("summary length = %d, want <= %d", length, maxHookwiseMappedSummaryLength)
 	}
 	if payload.NVTOID != finding.NVTOID || payload.Threat != finding.Threat ||
 		payload.QOD != finding.QOD || payload.Location != finding.Location ||
@@ -91,6 +103,41 @@ func TestReconcileHookwiseOutboxIncludesGreenboneFindingDetails(t *testing.T) {
 		payload.SolutionType != finding.SolutionType || len(payload.References) != 1 ||
 		payload.GreenboneReportID != snapshot.ReportID || payload.ScanEnd == "" {
 		t.Errorf("structured Greenbone payload = %#v", payload)
+	}
+}
+
+func TestHookwiseCVETitleAndLinksIgnoreInvalidIdentifiers(t *testing.T) {
+	value := ticketCandidate{
+		Fingerprint: "v1:cve-links", Title: "Example finding", Host: "192.0.2.5",
+		Port: "443/tcp", Severity: 7.6, CustomerName: "Customer", TaskName: "Task",
+		CVEs: "not-a-cve,CVE-2024-12345,cve-2024-12345,CVE-2023-0001/path",
+	}
+
+	summary := newHookwiseSummary(value)
+	if !strings.HasPrefix(summary, "CVE-2024-12345 S:7.6 - ") {
+		t.Errorf("newHookwiseSummary() = %q, want normalized CVE and score prefix", summary)
+	}
+	description := hookwiseDescription(value)
+	if count := strings.Count(description, "https://www.cve.org/CVERecord?id=CVE-2024-12345"); count != 1 {
+		t.Errorf("CVE.org valid-link count = %d, want 1:\n%s", count, description)
+	}
+	if count := strings.Count(description, "https://nvd.nist.gov/vuln/detail/CVE-2024-12345"); count != 1 {
+		t.Errorf("NVD valid-link count = %d, want 1:\n%s", count, description)
+	}
+	for _, unexpected := range []string{"not-a-cve", "CVE-2023-0001/path"} {
+		if strings.Contains(description, "https://nvd.nist.gov/vuln/detail/"+unexpected) {
+			t.Errorf("description contains link for invalid identifier %q", unexpected)
+		}
+	}
+}
+
+func TestHookwiseSummaryIncludesScoreWithoutCVE(t *testing.T) {
+	summary := newHookwiseSummary(ticketCandidate{
+		Fingerprint: "v1:score-only", Title: "SNMP default community",
+		Host: "192.0.2.10", Port: "161/udp", Severity: 7.6,
+	})
+	if !strings.HasPrefix(summary, "S:7.6 - SNMP default community") {
+		t.Errorf("newHookwiseSummary() = %q, want score prefix", summary)
 	}
 }
 

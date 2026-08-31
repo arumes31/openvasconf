@@ -265,7 +265,10 @@ func enqueueHookwiseTx(
 	return nil
 }
 
-const maxHookwiseMappedSummaryLength = 90
+const (
+	maxHookwiseMappedSummaryLength = 90
+	maxHookwiseCVEReferences       = 20
+)
 
 func hookwiseSummaryTx(
 	ctx context.Context,
@@ -309,6 +312,11 @@ func newHookwiseSummary(value ticketCandidate) string {
 	if title == "" {
 		title = "Security finding"
 	}
+	prefix := fmt.Sprintf("S:%.1f - ", value.Severity)
+	if cves := normalizedCVEs(value.CVEs); len(cves) > 0 {
+		prefix = cves[0] + " " + prefix
+	}
+	title = prefix + title
 	available := maxHookwiseMappedSummaryLength - len([]rune(suffix))
 	if available < 1 {
 		return boundedTicketText("Finding ["+shortKey+"]", maxHookwiseMappedSummaryLength)
@@ -337,6 +345,9 @@ func hookwiseDescription(value ticketCandidate) string {
 		risk = append(risk, "CVEs: "+strings.Join(cves, ", "))
 	}
 	sections = append(sections, "Risk details\n"+boundedTicketText(strings.Join(risk, "\n"), 1600))
+	if references := hookwiseCVEReferences(value.CVEs); references != "" {
+		sections = append(sections, "CVE references\n"+references)
+	}
 	appendSection := func(heading, content string, limit int) {
 		if content = boundedTicketText(content, limit); content != "" {
 			sections = append(sections, heading+"\n"+content)
@@ -382,6 +393,62 @@ func hookwiseDescription(value ticketCandidate) string {
 		description = string(runes[:maxHookwiseDescriptionLength])
 	}
 	return description
+}
+
+func hookwiseCVEReferences(value string) string {
+	cves := normalizedCVEs(value)
+	omitted := 0
+	if len(cves) > maxHookwiseCVEReferences {
+		omitted = len(cves) - maxHookwiseCVEReferences
+		cves = cves[:maxHookwiseCVEReferences]
+	}
+	lines := make([]string, 0, len(cves)*3+1)
+	for _, cve := range cves {
+		lines = append(
+			lines,
+			cve,
+			"CVE.org: https://www.cve.org/CVERecord?id="+cve,
+			"NVD: https://nvd.nist.gov/vuln/detail/"+cve,
+		)
+	}
+	if omitted > 0 {
+		lines = append(lines, fmt.Sprintf("%d additional CVE(s) omitted", omitted))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func normalizedCVEs(value string) []string {
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, candidate := range splitCVEs(value) {
+		cve := strings.ToUpper(strings.TrimSpace(candidate))
+		if !validCVE(cve) {
+			continue
+		}
+		if _, exists := seen[cve]; exists {
+			continue
+		}
+		seen[cve] = struct{}{}
+		result = append(result, cve)
+	}
+	return result
+}
+
+func validCVE(value string) bool {
+	parts := strings.Split(value, "-")
+	if len(parts) != 3 || parts[0] != "CVE" || len(parts[1]) != 4 || len(parts[2]) < 4 {
+		return false
+	}
+	return decimalDigits(parts[1]) && decimalDigits(parts[2])
+}
+
+func decimalDigits(value string) bool {
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return value != ""
 }
 
 func boundedTicketText(value string, maxRunes int) string {

@@ -614,8 +614,10 @@ enrichment service.
 ### Ticket eligibility and lifecycle
 
 Ticket identity is the customer, managed task, and stable finding fingerprint.
-The ticket summary contains a shortened fingerprint plus host and port because
-Hookwise uses the final summary for duplicate detection and close-event lookup.
+The ticket summary starts with the Greenbone severity score in compact `S:x.x`
+form and, when Greenbone supplies a valid CVE, the first CVE. It also contains a
+shortened fingerprint plus host and port. Hookwise uses the final summary for
+duplicate detection and close-event lookup.
 
 | Current finding state | Ticket action |
 |---|---|
@@ -714,17 +716,24 @@ destination key. Also do not map the numeric `$.severitysource` to Hookwise
 `severity`, or the narrative `$.impact` to Hookwise `impact`, unless the target
 ConnectWise installation explicitly accepts those exact values. The numeric
 Greenbone score and narrative impact are already preserved in the description.
+For each valid Greenbone-provided CVE, the description contains clickable
+CVE.org and NVD URLs. `openvasconf` constructs these URLs from the validated CVE
+identifier and does not request either website. At most 20 CVEs are expanded
+into links so evidence and remediation remain visible in the bounded ticket
+description.
 
 Do not map the Hookwise summary from `$.title`. NVT titles may change between
 feed versions. The `$.summary` emitted for an open event combines the NVT title,
-asset, and a shortened stable fingerprint, for example:
+severity score, the first valid CVE when present, asset, and a shortened stable
+fingerprint, for example:
 
 ```text
-OpenSSH Weak Encryption on 10.20.30.40:22/tcp [v1:fingerpri]
+CVE-2024-12345 S:7.6 - OpenSSH Weak Encryption on 10.20.30.40:22/tcp [v1:fingerpri]
 ```
 
 With the recommended Hookwise prefix, the final ConnectWise ticket name is
-`[OpenVAS] OpenSSH Weak Encryption on 10.20.30.40:22/tcp [v1:fingerpri]`.
+`[OpenVAS] CVE-2024-12345 S:7.6 - OpenSSH Weak Encryption on
+10.20.30.40:22/tcp [v1:fingerpri]`.
 `openvasconf` stores that mapped summary in the durable open event and reuses it
 verbatim for the matching close event. A later Greenbone feed title change
 therefore cannot break close lookup. Keep both the JSON summary mapping and the
