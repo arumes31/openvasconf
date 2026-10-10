@@ -118,14 +118,14 @@ jobs:
       - name: Check runtime image
         shell: bash
         run: |
-          test "$(docker image inspect openvasconf:ci --format '{{.Config.User}}')" = "openvasconf:openvasconf"
-          docker run --rm --entrypoint /bin/sh openvasconf:ci -c '! command -v node && ! command -v npm && ! command -v go'
+          test "$(docker image inspect openvasconf:ci --format '{{.Config.User}}')" = "1001:1001"
+          docker run --rm --entrypoint /bin/sh openvasconf:ci -c 'test "$(id -u)" = 1001 && test "$(id -g)" = 1001 && test "$(id -un)" = openvasconf && ! command -v node && ! command -v npm && ! command -v go'
       - name: Check updater image
         shell: bash
         run: |
-          test "$(docker image inspect openvasconf-updater:ci --format '{{.Config.User}}')" = "openvasconf:openvasconf"
+          test "$(docker image inspect openvasconf-updater:ci --format '{{.Config.User}}')" = "1001:1001"
           docker run --rm --entrypoint docker openvasconf-updater:ci compose version
-          docker run --rm --entrypoint /bin/sh openvasconf-updater:ci -c '! command -v node && ! command -v npm && ! command -v go'
+          docker run --rm --entrypoint /bin/sh openvasconf-updater:ci -c 'test "$(id -u)" = 1001 && test "$(id -g)" = 1001 && test "$(id -un)" = openvasconf && ! command -v node && ! command -v npm && ! command -v go'
       - name: Verify embedded asset in hardened runtime
         shell: bash
         run: |
