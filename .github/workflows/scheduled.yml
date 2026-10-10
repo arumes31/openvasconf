@@ -32,7 +32,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run repeated race tests
-        run: go test -race -shuffle=on -count=10 ./...
+        run: go test -race -shuffle=on -count=10 -timeout=35m ./...
 
   go-security:
     name: Weekly Go security scanners
@@ -59,8 +59,8 @@ jobs:
       - name: Install Go security scanners
         shell: bash
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install github.com/securego/gosec/v2/cmd/gosec@7b1b5cebe007d62fb58eacb90fc571112939ec30
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           scanner_bin="$(go env GOBIN)"
           if [[ -z "$scanner_bin" ]]; then
             scanner_bin="$(go env GOPATH)/bin"

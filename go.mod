@@ -1,9 +1,9 @@
 module openvasconf
 
-go 1.26.7
+go 1.26.9
 
 require (
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	modernc.org/sqlite v1.54.0
 )
 
