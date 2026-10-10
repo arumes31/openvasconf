@@ -11,7 +11,7 @@ RUN npm run build:assets
 FROM scratch AS asset-output
 COPY --from=assets /src/dist/app.js /app.js
 
-FROM golang:1.27-alpine@sha256:4c9fe60190a2a3350ddc51de80d0224b8a6698d12bdfc999fee45ea9d6c46dbc AS build
+FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -26,17 +26,17 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS updater
 
 RUN apk add --no-cache \
-        docker-cli=29.5.3-r0 \
-        docker-cli-compose=5.1.4-r0 \
-        libcrypto3=3.5.8-r0 \
-        libssl3=3.5.8-r0 \
+        docker-cli=29.8.2-r0 \
+        docker-cli-compose=5.1.4-r1 \
+        libcrypto3=3.5.9-r0 \
+        libssl3=3.5.9-r0 \
     && addgroup -g 1001 -S openvasconf \
     && adduser -u 1001 -S -D -H -G openvasconf openvasconf \
     && install -d -o openvasconf -g openvasconf -m 0700 /state /backups \
     && install -d -o openvasconf -g openvasconf -m 0750 /run/openvasconf-updater
 COPY --from=build --chown=openvasconf:openvasconf /out/openvasconf-updater /usr/local/bin/openvasconf-updater
 
-USER openvasconf:openvasconf
+USER 1001:1001
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["test", "-S", "/run/openvasconf-updater/updater.sock"]
 ENTRYPOINT ["/usr/local/bin/openvasconf-updater"]
@@ -44,14 +44,14 @@ ENTRYPOINT ["/usr/local/bin/openvasconf-updater"]
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
 
 RUN apk add --no-cache \
-        libcrypto3=3.5.8-r0 \
-        libssl3=3.5.8-r0 \
+        libcrypto3=3.5.9-r0 \
+        libssl3=3.5.9-r0 \
     && addgroup -g 1001 -S openvasconf \
     && adduser -u 1001 -S -D -H -G openvasconf openvasconf \
     && install -d -o openvasconf -g openvasconf -m 0700 /data
 COPY --from=build --chown=openvasconf:openvasconf /out/openvasconf /usr/local/bin/openvasconf
 
-USER openvasconf:openvasconf
+USER 1001:1001
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/live"]
