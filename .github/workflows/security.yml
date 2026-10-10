@@ -26,7 +26,7 @@ jobs:
       security-events: write # Publish gosec findings to code scanning.
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
       - name: Check out source
@@ -70,7 +70,7 @@ jobs:
           exit 0
       - name: Upload gosec SARIF
         if: ${{ always() && hashFiles('gosec.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: gosec.sarif
           category: gosec
@@ -104,7 +104,7 @@ jobs:
       security-events: write # Publish CodeQL analysis results.
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
       - name: Check out source
@@ -118,12 +118,12 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - name: Analyze with CodeQL
-        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           category: /language:${{ matrix.language }}
 
@@ -136,7 +136,7 @@ jobs:
       contents: read
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
       - name: Check out source
@@ -159,7 +159,7 @@ jobs:
       security-events: write # Publish Trivy findings to code scanning.
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
       - name: Check out source
@@ -167,7 +167,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Lint Dockerfile
-        uses: hadolint/hadolint-action@2a66e89f53d0771bb131a7fa31f3136336094aa6 # v3.4.0
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: Dockerfile
           failure-threshold: warning
@@ -202,13 +202,13 @@ jobs:
           exit-code: '1'
       - name: Upload filesystem SARIF
         if: ${{ always() && hashFiles('trivy-fs.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-filesystem
       - name: Upload image SARIF
         if: ${{ always() && hashFiles('trivy-image.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: trivy-image.sarif
           category: trivy-container
