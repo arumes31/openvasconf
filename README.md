@@ -1081,7 +1081,7 @@ node scripts/check-npm-licenses.mjs
 
 ## GitHub automation and releases
 
-The repository includes five fail-closed workflows:
+The repository includes seven fail-closed workflows:
 
 - **CI** checks formatting, vet, golangci-lint, shuffled/repeated/race tests,
   coverage, deterministic minification, and the final runtime image.
@@ -1092,11 +1092,16 @@ The repository includes five fail-closed workflows:
 - **Publish container** builds the application and updater helper for
   `linux/amd64` and `linux/arm64` with
   an SPDX SBOM, maximum provenance, GitHub artifact attestation, and keyless
-  Cosign signature.
+  Cosign signature. Tag pushes create GitHub release notes only after both
+  application and updater publication succeed.
 - **Weekly deep scan** runs repeated race tests, Go security scanners, and a
   no-cache image scan at 03:17 UTC each Monday or by manual dispatch.
 
-All third-party actions use full commit SHAs and all Docker base images use
+- **Secret scanning** checks repository history with a pinned Gitleaks version.
+- **GHCR cleanup** is manual, defaults to dry-run, and targets only old untagged
+  application/updater manifests while preserving children of retained image indexes.
+
+All third-party actions use full Git commit SHAs or OCI content digests. Docker base images use
 manifest digests. Dependabot checks Go, npm, Docker, and GitHub Actions weekly
 and groups related updates.
 

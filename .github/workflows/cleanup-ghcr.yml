@@ -28,7 +28,7 @@ jobs:
           args: >-
             --account=user
             --token=${{ secrets.GITHUB_TOKEN }}
-            --image-names=${{ github.event.repository.name }}
+            --image-names=${{ github.event.repository.name }},${{ github.event.repository.name }}-updater
             --tag-selection=untagged
             --keep-n-most-recent=20
             --timestamp-to-use=updated_at
