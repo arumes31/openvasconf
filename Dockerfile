@@ -26,8 +26,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS updater
 
 RUN apk add --no-cache \
-        docker-cli=29.8.2-r0 \
-        docker-cli-compose=5.1.4-r1 \
+        docker-cli=29.8.2-r1 \
+        docker-cli-compose=5.1.4-r2 \
         libcrypto3=3.5.9-r0 \
         libssl3=3.5.9-r0 \
     && addgroup -g 1001 -S openvasconf \
