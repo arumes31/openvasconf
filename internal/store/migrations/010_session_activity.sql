@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN last_seen_at TEXT NOT NULL DEFAULT '';

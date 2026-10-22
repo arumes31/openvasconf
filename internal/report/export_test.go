@@ -296,3 +296,31 @@ func TestPDFExportManyRowsPaginates(t *testing.T) {
 		t.Error("missing row-cap note")
 	}
 }
+
+func TestCSVSafe(t *testing.T) {
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{value: "", want: ""},
+		{value: "plain", want: "plain"},
+		{value: "10.0.0.1", want: "10.0.0.1"},
+		{value: "=1+1", want: "'=1+1"},
+		{value: "+1", want: "'+1"},
+		{value: "-1", want: "'-1"},
+		{value: "@SUM(A1)", want: "'@SUM(A1)"},
+		{value: "  =cmd", want: "'  =cmd"},
+		{value: "\t=cmd", want: "'\t=cmd"},
+		{value: "\tvalue", want: "'\tvalue"},
+		{value: "\rvalue", want: "'\rvalue"},
+		{value: "\nvalue", want: "'\nvalue"},
+		{value: "\uFF1Dcmd", want: "'\uFF1Dcmd"},
+		{value: "\u3000\uFF20cmd", want: "'\u3000\uFF20cmd"},
+		{value: "a=b", want: "a=b"},
+	}
+	for _, testCase := range tests {
+		if got := csvSafe(testCase.value); got != testCase.want {
+			t.Errorf("csvSafe(%q) = %q, want %q", testCase.value, got, testCase.want)
+		}
+	}
+}

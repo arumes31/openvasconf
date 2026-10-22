@@ -58,6 +58,7 @@ type Authenticator interface {
 	Login(ctx context.Context, username, password string) (string, time.Time, error)
 	Valid(ctx context.Context, token string) (bool, error)
 	Logout(ctx context.Context, token string) error
+	LogoutAll(ctx context.Context) error
 }
 
 type Greenbone interface {
@@ -91,6 +92,9 @@ type Options struct {
 	Logger              *slog.Logger
 	SecureCookies       bool
 	TrustProxyTLSHeader bool
+	// TrustProxyClientIP keys login rate limiting on the client address the
+	// reverse proxy appends to X-Forwarded-For instead of the TCP peer.
+	TrustProxyClientIP bool
 	// Export limits; zero values select the defaults (100k rows, 50MB).
 	ExportMaxRows  int
 	ExportMaxBytes int64
@@ -113,6 +117,7 @@ type Server struct {
 	templates           *template.Template
 	secureCookies       bool
 	trustProxyTLSHeader bool
+	trustProxyClientIP  bool
 	exportMaxRows       int
 	exportMaxBytes      int64
 	loginLimiter        *loginLimiter
@@ -219,6 +224,7 @@ func New(options Options) (*Server, error) {
 		templates:           templates,
 		secureCookies:       options.SecureCookies,
 		trustProxyTLSHeader: options.TrustProxyTLSHeader,
+		trustProxyClientIP:  options.TrustProxyClientIP,
 		exportMaxRows:       exportMaxRows,
 		exportMaxBytes:      exportMaxBytes,
 		loginLimiter:        newLoginLimiter(),
@@ -236,6 +242,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /", s.requireAuth(http.HandlerFunc(s.dashboard)))
 	mux.Handle("POST /logout", s.requireAuth(http.HandlerFunc(s.logout)))
+	mux.Handle("POST /logout/all", s.requireAuth(http.HandlerFunc(s.logoutAll)))
 	mux.Handle("GET /customers/new", s.requireAuth(http.HandlerFunc(s.customerNew)))
 	mux.Handle("POST /customers", s.requireAuth(http.HandlerFunc(s.customerCreate)))
 	mux.Handle("POST /customers/preview", s.requireAuth(http.HandlerFunc(s.customerPreviewNew)))

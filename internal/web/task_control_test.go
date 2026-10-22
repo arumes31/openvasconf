@@ -63,7 +63,7 @@ func newTaskControlApp(t *testing.T, greenbone *fakeTaskControlGreenbone) testWe
 	t.Cleanup(func() { _ = repository.Close() })
 
 	authenticator := auth.New(repository, time.Hour)
-	if err := authenticator.Bootstrap(context.Background(), testAdminPassword); err != nil {
+	if _, err := authenticator.Bootstrap(context.Background(), testAdminPassword); err != nil {
 		t.Fatal(err)
 	}
 	syncer := &triggerCounter{}

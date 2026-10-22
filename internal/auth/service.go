@@ -21,15 +21,18 @@ var ErrInvalidCredentials = errors.New("auth: invalid credentials")
 type Store interface {
 	AdminPasswordHash(ctx context.Context) ([]byte, error)
 	CreateAdmin(ctx context.Context, passwordHash []byte) error
+	ReplaceAdminPassword(ctx context.Context, passwordHash []byte) error
 	CreateSession(ctx context.Context, tokenHash string, expiresAt time.Time) error
-	SessionValid(ctx context.Context, tokenHash string, now time.Time) (bool, error)
+	SessionActive(ctx context.Context, tokenHash string, now time.Time, idleTimeout time.Duration) (bool, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteAllSessions(ctx context.Context) error
 }
 
 type Service struct {
-	store    Store
-	lifetime time.Duration
-	now      func() time.Time
+	store       Store
+	lifetime    time.Duration
+	idleTimeout time.Duration
+	now         func() time.Time
 }
 
 func New(store Store, lifetime time.Duration) *Service {
@@ -40,22 +43,43 @@ func New(store Store, lifetime time.Duration) *Service {
 	}
 }
 
-func (s *Service) Bootstrap(ctx context.Context, password string) error {
-	_, err := s.store.AdminPasswordHash(ctx)
+// WithIdleTimeout ends sessions that have not been used for timeout. Zero
+// disables the idle limit and leaves only the absolute session lifetime.
+func (s *Service) WithIdleTimeout(timeout time.Duration) *Service {
+	s.idleTimeout = timeout
+	return s
+}
+
+// Bootstrap creates the admin account from the configured password. When the
+// account already exists and the configured password no longer matches, the
+// password was rotated: the new hash is stored and every session is revoked.
+// It reports whether an existing password was rotated.
+func (s *Service) Bootstrap(ctx context.Context, password string) (bool, error) {
+	current, err := s.store.AdminPasswordHash(ctx)
 	if err == nil {
-		return nil
+		if bcrypt.CompareHashAndPassword(current, []byte(password)) == nil {
+			return false, nil
+		}
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+		if hashErr != nil {
+			return false, fmt.Errorf("hashing admin password: %w", hashErr)
+		}
+		if err := s.store.ReplaceAdminPassword(ctx, hash); err != nil {
+			return false, fmt.Errorf("rotating admin password: %w", err)
+		}
+		return true, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("checking admin account: %w", err)
+		return false, fmt.Errorf("checking admin account: %w", err)
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
-		return fmt.Errorf("hashing admin password: %w", err)
+		return false, fmt.Errorf("hashing admin password: %w", err)
 	}
 	if err := s.store.CreateAdmin(ctx, hash); err != nil {
-		return fmt.Errorf("bootstrapping admin account: %w", err)
+		return false, fmt.Errorf("bootstrapping admin account: %w", err)
 	}
-	return nil
+	return false, nil
 }
 
 func (s *Service) Login(ctx context.Context, username, password string) (string, time.Time, error) {
@@ -84,7 +108,7 @@ func (s *Service) Valid(ctx context.Context, token string) (bool, error) {
 	if token == "" {
 		return false, nil
 	}
-	return s.store.SessionValid(ctx, tokenHash(token), s.now())
+	return s.store.SessionActive(ctx, tokenHash(token), s.now(), s.idleTimeout)
 }
 
 func (s *Service) Logout(ctx context.Context, token string) error {
@@ -92,6 +116,11 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 		return nil
 	}
 	return s.store.DeleteSession(ctx, tokenHash(token))
+}
+
+// LogoutAll revokes every session, including the caller's.
+func (s *Service) LogoutAll(ctx context.Context) error {
+	return s.store.DeleteAllSessions(ctx)
 }
 
 func tokenHash(token string) string {

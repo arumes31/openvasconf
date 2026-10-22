@@ -353,6 +353,13 @@ services:
       OPENVASCONF_TIMEZONE: "${OPENVASCONF_TIMEZONE:-Europe/Vienna}"
       OPENVASCONF_REPORT_FETCH_TIMEOUT: "${OPENVASCONF_REPORT_FETCH_TIMEOUT:-5m}"
       OPENVASCONF_SECURE_COOKIES: "${OPENVASCONF_SECURE_COOKIES:-false}"
+      # The port is published on host loopback only, so these headers can only
+      # come from a local reverse proxy. Set both to false if the port is ever
+      # exposed directly.
+      OPENVASCONF_TRUST_PROXY_TLS: "${OPENVASCONF_TRUST_PROXY_TLS:-true}"
+      OPENVASCONF_TRUST_PROXY_CLIENT_IP: "${OPENVASCONF_TRUST_PROXY_CLIENT_IP:-true}"
+      OPENVASCONF_SESSION_IDLE_TIMEOUT: "${OPENVASCONF_SESSION_IDLE_TIMEOUT:-2h}"
+      OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP: "${OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP:-false}"
     secrets:
       - openvasconf_admin_password
       - openvasconf_gmp_password

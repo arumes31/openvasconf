@@ -36,6 +36,10 @@
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <button class="text-button" type="submit">Lock</button>
     </form>
+    <form method="post" action="/logout/all" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button class="text-button" type="submit" title="Revoke every admin session, including sessions on other devices">Lock all sessions</button>
+    </form>
   </div>
 </header>
 {{end}}

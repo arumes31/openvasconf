@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,9 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		response.Header().Set("X-Frame-Options", "DENY")
 		response.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		response.Header().Set("Cache-Control", "no-store")
+		if s.servedOverHTTPS(request) {
+			response.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		next.ServeHTTP(response, request)
 	})
 }
@@ -43,23 +47,12 @@ func (s *Server) csrf(next http.Handler) http.Handler {
 			token = cookie.Value
 		}
 		if token == "" {
-			generated, err := id.Token(32)
+			generated, err := s.issueCSRFToken(response, request)
 			if err != nil {
 				http.Error(response, "unable to initialize request security", http.StatusInternalServerError)
 				return
 			}
 			token = generated
-			// codeql[go/cookie-secure-not-set]
-			// #nosec G124 -- Secure is selected from TLS and trusted deployment configuration.
-			http.SetCookie(response, &http.Cookie{
-				Name:     csrfCookieName,
-				Value:    token,
-				Path:     "/",
-				MaxAge:   86400,
-				HttpOnly: true,
-				Secure:   s.isSecure(request),
-				SameSite: http.SameSiteStrictMode,
-			})
 		}
 		request = request.WithContext(context.WithValue(request.Context(), csrfContextKey, token))
 		if request.Method == http.MethodPost {
@@ -86,6 +79,27 @@ func (s *Server) csrf(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(response, request)
 	})
+}
+
+// issueCSRFToken sets a fresh double-submit token cookie. Login and logout call
+// it too, so a token planted before authentication does not survive it.
+func (s *Server) issueCSRFToken(response http.ResponseWriter, request *http.Request) (string, error) {
+	token, err := id.Token(32)
+	if err != nil {
+		return "", err
+	}
+	// codeql[go/cookie-secure-not-set]
+	// #nosec G124 -- Secure is selected from TLS and trusted deployment configuration.
+	http.SetCookie(response, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   86400,
+		HttpOnly: true,
+		Secure:   s.isSecure(request),
+		SameSite: http.SameSiteStrictMode,
+	})
+	return token, nil
 }
 
 func constantTimeEqual(expected, actual string) bool {
@@ -122,7 +136,13 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 }
 
 func (s *Server) isSecure(request *http.Request) bool {
-	if s.secureCookies || request.TLS != nil {
+	return s.secureCookies || s.servedOverHTTPS(request)
+}
+
+// servedOverHTTPS reports whether the browser reached the service over TLS,
+// either directly or through a trusted TLS-terminating proxy.
+func (s *Server) servedOverHTTPS(request *http.Request) bool {
+	if request.TLS != nil {
 		return true
 	}
 	return s.trustProxyTLSHeader && strings.EqualFold(
@@ -131,44 +151,129 @@ func (s *Server) isSecure(request *http.Request) bool {
 	)
 }
 
+const (
+	loginWindow = 15 * time.Minute
+	// loginClientFailures is the failure budget of one client address (an IPv6
+	// client is keyed by its /64) inside loginWindow.
+	loginClientFailures = 5
+	// loginGlobalFailures caps failures across all clients inside loginWindow,
+	// so rotating source addresses cannot buy unlimited password guesses.
+	loginGlobalFailures = 50
+	// loginMaxClients bounds the per-client map; clients beyond it share one
+	// overflow bucket until expired entries are swept.
+	loginMaxClients    = 10000
+	loginSweepInterval = time.Minute
+	loginOverflowKey   = "overflow"
+)
+
 type loginLimiter struct {
-	mu       sync.Mutex
-	attempts map[string][]time.Time
+	mu        sync.Mutex
+	attempts  map[string][]time.Time
+	global    []time.Time
+	lastSweep time.Time
 }
 
 func newLoginLimiter() *loginLimiter {
 	return &loginLimiter{attempts: make(map[string][]time.Time)}
 }
 
-func (l *loginLimiter) allowed(remoteAddress string, now time.Time) bool {
-	host := remoteHost(remoteAddress)
-	cutoff := now.Add(-15 * time.Minute)
+func (l *loginLimiter) allowed(client string, now time.Time) bool {
+	cutoff := now.Add(-loginWindow)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	recent := l.attempts[host][:0]
-	for _, attempt := range l.attempts[host] {
+	l.sweep(now, cutoff)
+	l.global = recentAttempts(l.global, cutoff)
+	if len(l.global) >= loginGlobalFailures {
+		return false
+	}
+	key := l.key(client)
+	recent := recentAttempts(l.attempts[key], cutoff)
+	if len(recent) == 0 {
+		delete(l.attempts, key)
+	} else {
+		l.attempts[key] = recent
+	}
+	return len(recent) < loginClientFailures
+}
+
+func (l *loginLimiter) failure(client string, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	key := l.key(client)
+	l.attempts[key] = append(l.attempts[key], now)
+	l.global = append(l.global, now)
+}
+
+func (l *loginLimiter) success(client string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	delete(l.attempts, l.key(client))
+}
+
+// key returns the bucket for client, falling back to the shared overflow
+// bucket when the map is full. Callers hold l.mu.
+func (l *loginLimiter) key(client string) string {
+	if _, ok := l.attempts[client]; ok || len(l.attempts) < loginMaxClients {
+		return client
+	}
+	return loginOverflowKey
+}
+
+// sweep drops expired entries for every client at most once per
+// loginSweepInterval. Callers hold l.mu.
+func (l *loginLimiter) sweep(now, cutoff time.Time) {
+	if now.Sub(l.lastSweep) < loginSweepInterval {
+		return
+	}
+	l.lastSweep = now
+	for key, attempts := range l.attempts {
+		if recent := recentAttempts(attempts, cutoff); len(recent) == 0 {
+			delete(l.attempts, key)
+		} else {
+			l.attempts[key] = recent
+		}
+	}
+}
+
+func recentAttempts(attempts []time.Time, cutoff time.Time) []time.Time {
+	recent := attempts[:0]
+	for _, attempt := range attempts {
 		if attempt.After(cutoff) {
 			recent = append(recent, attempt)
 		}
 	}
-	l.attempts[host] = recent
-	return len(recent) < 5
+	return recent
 }
 
-func (l *loginLimiter) failure(remoteAddress string, now time.Time) {
-	host := remoteHost(remoteAddress)
-	l.mu.Lock()
-	l.attempts[host] = append(l.attempts[host], now)
-	l.mu.Unlock()
-}
-
-func (l *loginLimiter) success(remoteAddress string) {
-	host := remoteHost(remoteAddress)
-	l.mu.Lock()
-	delete(l.attempts, host)
-	l.mu.Unlock()
+// loginClient returns the rate-limit key for request. The rightmost
+// X-Forwarded-For entry, which the reverse proxy itself appended, is used only
+// when the deployment trusts its proxy; otherwise the TCP peer address is used.
+// IPv6 clients are keyed by their /64 because one host usually controls a
+// whole /64.
+func (s *Server) loginClient(request *http.Request) string {
+	host := remoteHost(request.RemoteAddr)
+	if s.trustProxyClientIP {
+		if forwarded := request.Header.Values("X-Forwarded-For"); len(forwarded) > 0 {
+			entries := strings.Split(forwarded[len(forwarded)-1], ",")
+			if candidate := strings.TrimSpace(entries[len(entries)-1]); candidate != "" {
+				host = candidate
+			}
+		}
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
+		return host
+	}
+	address = address.Unmap()
+	if address.Is6() {
+		prefix, _ := address.Prefix(64)
+		return prefix.String()
+	}
+	return address.String()
 }
 
 func remoteHost(remoteAddress string) string {

@@ -520,7 +520,7 @@ func loadWebApp(t *testing.T, repository *store.Store) (*httptest.Server, *http.
 	t.Helper()
 	ctx := context.Background()
 	authenticator := auth.New(repository, time.Hour)
-	if err := authenticator.Bootstrap(ctx, loadAdminPassword); err != nil {
+	if _, err := authenticator.Bootstrap(ctx, loadAdminPassword); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
 	application, err := web.New(web.Options{

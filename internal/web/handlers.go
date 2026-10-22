@@ -16,13 +16,15 @@ func (s *Server) healthLive(response http.ResponseWriter, _ *http.Request) {
 	writeJSON(response, http.StatusOK, map[string]any{"status": "live"})
 }
 
+// healthReady is unauthenticated, so it reports only readiness. Component
+// state and the Greenbone version stay behind the authenticated /api/status.
 func (s *Server) healthReady(response http.ResponseWriter, request *http.Request) {
 	result := s.status(request.Context())
-	status := http.StatusOK
 	if !result.Database || !result.Greenbone {
-		status = http.StatusServiceUnavailable
+		writeJSON(response, http.StatusServiceUnavailable, map[string]any{"status": "unavailable"})
+		return
 	}
-	writeJSON(response, status, result)
+	writeJSON(response, http.StatusOK, map[string]any{"status": "ready"})
 }
 
 func (s *Server) loginPage(response http.ResponseWriter, request *http.Request) {
@@ -30,7 +32,8 @@ func (s *Server) loginPage(response http.ResponseWriter, request *http.Request) 
 }
 
 func (s *Server) login(response http.ResponseWriter, request *http.Request) {
-	if !s.loginLimiter.allowed(request.RemoteAddr, time.Now()) {
+	client := s.loginClient(request)
+	if !s.loginLimiter.allowed(client, time.Now()) {
 		s.render(response, request, "login.html", pageData{
 			Title: "Operator login",
 			Error: "Too many login attempts. Wait before trying again.",
@@ -43,7 +46,7 @@ func (s *Server) login(response http.ResponseWriter, request *http.Request) {
 		request.PostForm.Get("password"),
 	)
 	if errors.Is(err, auth.ErrInvalidCredentials) {
-		s.loginLimiter.failure(request.RemoteAddr, time.Now())
+		s.loginLimiter.failure(client, time.Now())
 		s.render(response, request, "login.html", pageData{
 			Title: "Operator login",
 			Error: "Invalid username or password.",
@@ -55,7 +58,12 @@ func (s *Server) login(response http.ResponseWriter, request *http.Request) {
 		http.Error(response, "service temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	s.loginLimiter.success(request.RemoteAddr)
+	s.loginLimiter.success(client)
+	if _, err := s.issueCSRFToken(response, request); err != nil {
+		s.logger.Error("rotating request token failed", "error", err)
+		http.Error(response, "unable to initialize request security", http.StatusInternalServerError)
+		return
+	}
 	// codeql[go/cookie-secure-not-set]
 	// #nosec G124 -- Secure is selected from TLS and trusted deployment configuration.
 	http.SetCookie(response, &http.Cookie{
@@ -75,6 +83,27 @@ func (s *Server) logout(response http.ResponseWriter, request *http.Request) {
 		if err := s.auth.Logout(request.Context(), cookie.Value); err != nil {
 			s.logger.Error("logout failed", "error", err)
 		}
+	}
+	s.endBrowserSession(response, request)
+}
+
+// logoutAll revokes every admin session, for example after a suspected
+// credential or cookie compromise.
+func (s *Server) logoutAll(response http.ResponseWriter, request *http.Request) {
+	if err := s.auth.LogoutAll(request.Context()); err != nil {
+		s.logger.Error("revoking all sessions failed", "error", err)
+		http.Error(response, "service temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	s.logger.Warn("all admin sessions revoked")
+	s.endBrowserSession(response, request)
+}
+
+// endBrowserSession rotates the request token, expires the session cookie, and
+// returns the browser to the login page.
+func (s *Server) endBrowserSession(response http.ResponseWriter, request *http.Request) {
+	if _, err := s.issueCSRFToken(response, request); err != nil {
+		s.logger.Error("rotating request token failed", "error", err)
 	}
 	// codeql[go/cookie-secure-not-set]
 	// #nosec G124 -- this expires the cookie using the same deployment policy.
