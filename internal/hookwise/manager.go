@@ -14,9 +14,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"openvasconf/internal/customer"
@@ -50,6 +53,7 @@ type Manager struct {
 	client     *http.Client
 	logger     *slog.Logger
 	trigger    chan struct{}
+	allowHTTP  bool
 }
 
 // New constructs a manager. A missing key is allowed while integration is
@@ -60,6 +64,8 @@ func New(repository Repository, key []byte, timeout time.Duration, logger *slog.
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: refuseInternalAddress}
+	transport.DialContext = dialer.DialContext
 	return &Manager{
 		repository: repository,
 		key:        append([]byte(nil), key...),
@@ -73,6 +79,14 @@ func New(repository Repository, key []byte, timeout time.Duration, logger *slog.
 		logger:  logger,
 		trigger: make(chan struct{}, 1),
 	}
+}
+
+// AllowInsecureHTTP permits plain-http endpoints. They send the bearer token
+// and finding details unencrypted, so https is required unless an operator
+// explicitly opts in.
+func (m *Manager) AllowInsecureHTTP(allow bool) *Manager {
+	m.allowHTTP = allow
+	return m
 }
 
 // Trigger requests an out-of-band reconciliation and delivery pass.
@@ -119,7 +133,7 @@ func (m *Manager) DispatchOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hookwise: decrypting token: %w", err)
 	}
-	if err := validateEndpoint(settings.Hookwise.Endpoint); err != nil {
+	if err := m.validateEndpoint(settings.Hookwise.Endpoint); err != nil {
 		return err
 	}
 	if err := m.repository.ReconcileHookwiseOutbox(ctx); err != nil {
@@ -154,7 +168,9 @@ func (m *Manager) DispatchOnce(ctx context.Context) error {
 }
 
 // Save validates and encrypts global integration settings. An empty token
-// preserves the current write-only credential.
+// preserves the current write-only credential only while the endpoint keeps
+// its scheme and host; a changed destination requires the token again so the
+// stored credential cannot be redirected to another server.
 func (m *Manager) Save(
 	ctx context.Context,
 	enabled bool,
@@ -163,7 +179,7 @@ func (m *Manager) Save(
 ) error {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint != "" {
-		if err := validateEndpoint(endpoint); err != nil {
+		if err := m.validateEndpoint(endpoint); err != nil {
 			return err
 		}
 	}
@@ -172,9 +188,16 @@ func (m *Manager) Save(
 		return err
 	}
 	config := current.Hookwise
+	token = strings.TrimSpace(token)
+	if token == "" && config.TokenCipher != "" && !sameDestination(config.Endpoint, endpoint) {
+		if enabled {
+			return errors.New("hookwise bearer token must be entered again when the endpoint host changes")
+		}
+		config.TokenCipher = ""
+	}
 	config.Enabled = enabled
 	config.Endpoint = endpoint
-	if token = strings.TrimSpace(token); token != "" {
+	if token != "" {
 		config.TokenCipher, err = m.encrypt(token)
 		if err != nil {
 			return err
@@ -205,7 +228,7 @@ func (m *Manager) Test(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := validateEndpoint(settings.Hookwise.Endpoint); err != nil {
+	if err := m.validateEndpoint(settings.Hookwise.Endpoint); err != nil {
 		return err
 	}
 	token, err := m.decrypt(settings.Hookwise.TokenCipher)
@@ -313,21 +336,68 @@ func (m *Manager) send(ctx context.Context, endpoint, token string, payload []by
 		return response.StatusCode, fmt.Errorf("closing webhook response: %w", closeErr)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return response.StatusCode, fmt.Errorf("webhook returned %s: %s", response.Status, strings.TrimSpace(string(body)))
+		// The remote body is logged for diagnosis but not persisted with the
+		// event, so an arbitrary endpoint cannot write content into the database.
+		m.logger.Warn("hookwise endpoint rejected event", "status", response.StatusCode,
+			"response", strings.Join(strings.Fields(string(body)), " "))
+		return response.StatusCode, fmt.Errorf("webhook returned %s", response.Status)
 	}
 	return response.StatusCode, nil
 }
 
-func validateEndpoint(value string) error {
+func (m *Manager) validateEndpoint(value string) error {
+	return validateEndpoint(value, m.allowHTTP)
+}
+
+func validateEndpoint(value string, allowHTTP bool) error {
 	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
 	if err != nil {
 		return errors.New("hookwise endpoint must be a valid absolute URL")
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return errors.New("hookwise endpoint must use http or https")
+	switch parsed.Scheme {
+	case "https":
+	case "http":
+		if !allowHTTP {
+			return errors.New("hookwise endpoint must use https (set OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP=true to permit http)")
+		}
+	default:
+		return errors.New("hookwise endpoint must use https")
 	}
 	if parsed.Host == "" || parsed.User != nil {
 		return errors.New("hookwise endpoint must contain a host and no embedded credentials")
+	}
+	return nil
+}
+
+// sameDestination reports whether two endpoints share scheme and host, which
+// decides whether a stored bearer token may be reused for the new endpoint.
+func sameDestination(current, next string) bool {
+	currentURL, currentErr := url.Parse(strings.TrimSpace(current))
+	nextURL, nextErr := url.Parse(strings.TrimSpace(next))
+	if currentErr != nil || nextErr != nil {
+		return false
+	}
+	return strings.EqualFold(currentURL.Scheme, nextURL.Scheme) &&
+		strings.EqualFold(currentURL.Host, nextURL.Host)
+}
+
+// refuseInternalAddress stops webhook connections to loopback, link-local
+// (including cloud metadata), multicast, and unspecified addresses, so the
+// dispatcher cannot be pointed at services that only listen on the host.
+// Private network ranges stay allowed because Hookwise commonly runs there.
+func refuseInternalAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("hookwise: invalid dial address %q", address)
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("hookwise: invalid dial address %q", address)
+	}
+	ip = ip.Unmap()
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return fmt.Errorf("hookwise: endpoint address %s is not allowed", ip)
 	}
 	return nil
 }

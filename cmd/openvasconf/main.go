@@ -70,9 +70,13 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	authenticator := auth.New(repository, cfg.SessionLifetime)
-	if err := authenticator.Bootstrap(ctx, cfg.AdminPassword); err != nil {
+	authenticator := auth.New(repository, cfg.SessionLifetime).WithIdleTimeout(cfg.SessionIdleTimeout)
+	rotated, err := authenticator.Bootstrap(ctx, cfg.AdminPassword)
+	if err != nil {
 		return fmt.Errorf("bootstrapping authentication: %w", err)
+	}
+	if rotated {
+		logger.Warn("admin password changed in configuration; stored password replaced and all sessions revoked")
 	}
 
 	greenbone := gmp.New(
@@ -106,7 +110,7 @@ func run(logger *slog.Logger) error {
 		cfg.HookwiseEncryptionKey,
 		cfg.ExternalTimeout,
 		logger,
-	)
+	).AllowInsecureHTTP(cfg.HookwiseAllowInsecureHTTP)
 	webServer, err := web.New(web.Options{
 		Repository:          repository,
 		Auth:                authenticator,
@@ -118,6 +122,7 @@ func run(logger *slog.Logger) error {
 		Logger:              logger,
 		SecureCookies:       cfg.SecureCookies,
 		TrustProxyTLSHeader: cfg.TrustProxyTLSHeader,
+		TrustProxyClientIP:  cfg.TrustProxyClientIP,
 		ExportMaxRows:       cfg.ExportMaxRows,
 		ExportMaxBytes:      cfg.ExportMaxBytes,
 	})

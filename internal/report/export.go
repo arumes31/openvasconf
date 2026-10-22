@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ExportRow is one finding row prepared for export, combining the immutable
@@ -101,15 +103,25 @@ func csvRecord(row ExportRow) []string {
 	}
 }
 
-// csvSafe guards against spreadsheet formula injection: a leading =, +, -, or
-// @ would be evaluated as a formula when the CSV is opened in a spreadsheet,
-// so the field is prefixed with a single quote.
+// csvSafe guards against spreadsheet formula injection (OWASP CSV injection):
+// a value whose first non-blank character is =, +, -, or @ (including the
+// fullwidth forms), or which starts with a tab, carriage return, or line feed,
+// could be evaluated as a formula when the CSV is opened in a spreadsheet, so
+// the field is prefixed with a single quote.
 func csvSafe(value string) string {
 	if value == "" {
 		return value
 	}
 	switch value[0] {
-	case '=', '+', '-', '@':
+	case '\t', '\r', '\n':
+		return "'" + value
+	}
+	trimmed := strings.TrimLeftFunc(value, unicode.IsSpace)
+	if trimmed == "" {
+		return value
+	}
+	switch first, _ := utf8.DecodeRuneInString(trimmed); first {
+	case '=', '+', '-', '@', '\uFF1D', '\uFF0B', '\uFF0D', '\uFF20':
 		return "'" + value
 	}
 	return value

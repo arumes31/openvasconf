@@ -1,12 +1,15 @@
 package hookwise
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -66,7 +69,9 @@ func TestManagerDispatchesOpenAndCloseLifecycle(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	manager := New(repository, []byte("0123456789abcdef0123456789abcdef"), time.Second, slog.Default())
+	manager := New(repository, []byte("0123456789abcdef0123456789abcdef"), time.Second, slog.Default()).
+		AllowInsecureHTTP(true)
+	allowLoopbackDial(manager)
 	if err := manager.Save(ctx, true, server.URL+"/webhook/test", "ticket-secret"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -127,24 +132,123 @@ func TestManagerDispatchesOpenAndCloseLifecycle(t *testing.T) {
 	}
 }
 
+// allowLoopbackDial replaces the internal-address guard so tests can deliver
+// to httptest servers on 127.0.0.1.
+func allowLoopbackDial(manager *Manager) {
+	manager.client.Transport.(*http.Transport).DialContext = (&net.Dialer{}).DialContext
+}
+
 func TestValidateEndpoint(t *testing.T) {
 	tests := []struct {
-		name    string
-		value   string
-		wantErr bool
+		name      string
+		value     string
+		allowHTTP bool
+		wantErr   bool
 	}{
 		{name: "https", value: "https://hookwise.example/webhook/1"},
-		{name: "internal http", value: "http://10.0.0.5:8080/webhook/1"},
+		{name: "internal http rejected by default", value: "http://10.0.0.5:8080/webhook/1", wantErr: true},
+		{name: "internal http with opt-in", value: "http://10.0.0.5:8080/webhook/1", allowHTTP: true},
 		{name: "embedded credentials", value: "https://user:pass@example.com/hook", wantErr: true},
-		{name: "unsupported scheme", value: "file:///tmp/hook", wantErr: true},
+		{name: "unsupported scheme", value: "file:///tmp/hook", allowHTTP: true, wantErr: true},
 		{name: "relative", value: "/webhook/1", wantErr: true},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := validateEndpoint(testCase.value)
+			err := validateEndpoint(testCase.value, testCase.allowHTTP)
 			if (err != nil) != testCase.wantErr {
 				t.Errorf("validateEndpoint(%q) error = %v, wantErr %t", testCase.value, err, testCase.wantErr)
 			}
 		})
+	}
+}
+
+func TestSaveRequiresTokenWhenEndpointHostChanges(t *testing.T) {
+	ctx := t.Context()
+	repository, err := store.Open(ctx, filepath.Join(t.TempDir(), "hookwise.db"), "Europe/Vienna")
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	manager := New(repository, []byte("0123456789abcdef0123456789abcdef"), time.Second, slog.Default())
+
+	if err := manager.Save(ctx, true, "https://hookwise.example/w/1", "ticket-secret"); err != nil {
+		t.Fatalf("Save(initial) error = %v", err)
+	}
+	if err := manager.Save(ctx, true, "https://hookwise.example/w/2", ""); err != nil {
+		t.Fatalf("Save(same host) error = %v", err)
+	}
+	if err := manager.Save(ctx, true, "https://attacker.example/w/2", ""); err == nil {
+		t.Fatal("Save(changed host without token) error = nil, want error")
+	}
+	settings, err := repository.Settings(ctx)
+	if err != nil {
+		t.Fatalf("Settings() error = %v", err)
+	}
+	if settings.Hookwise.Endpoint != "https://hookwise.example/w/2" {
+		t.Errorf("endpoint = %q, want unchanged", settings.Hookwise.Endpoint)
+	}
+	if err := manager.Save(ctx, false, "https://other.example/w/3", ""); err != nil {
+		t.Fatalf("Save(disabled, changed host) error = %v", err)
+	}
+	settings, err = repository.Settings(ctx)
+	if err != nil {
+		t.Fatalf("Settings() error = %v", err)
+	}
+	if settings.Hookwise.TokenCipher != "" {
+		t.Error("stored token was kept for a changed endpoint host")
+	}
+	if err := manager.Save(ctx, true, "https://other.example/w/3", "new-secret"); err != nil {
+		t.Fatalf("Save(changed host with token) error = %v", err)
+	}
+}
+
+func TestRefuseInternalAddress(t *testing.T) {
+	tests := []struct {
+		address string
+		wantErr bool
+	}{
+		{address: "10.0.0.5:443"},
+		{address: "192.168.1.10:8080"},
+		{address: "203.0.113.7:443"},
+		{address: "127.0.0.1:8080", wantErr: true},
+		{address: "[::1]:443", wantErr: true},
+		{address: "169.254.169.254:80", wantErr: true},
+		{address: "[fe80::1]:443", wantErr: true},
+		{address: "0.0.0.0:443", wantErr: true},
+		{address: "[::ffff:127.0.0.1]:443", wantErr: true},
+		{address: "224.0.0.1:443", wantErr: true},
+	}
+	for _, testCase := range tests {
+		if err := refuseInternalAddress("tcp", testCase.address, nil); (err != nil) != testCase.wantErr {
+			t.Errorf("refuseInternalAddress(%q) error = %v, wantErr %t", testCase.address, err, testCase.wantErr)
+		}
+	}
+}
+
+func TestSendDoesNotPersistResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(response, "remote controlled content")
+	}))
+	t.Cleanup(server.Close)
+	manager := New(nil, nil, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	allowLoopbackDial(manager)
+	status, err := manager.send(context.Background(), server.URL, "token", []byte("{}"))
+	if status != http.StatusBadRequest || err == nil {
+		t.Fatalf("send() = %d, %v", status, err)
+	}
+	if strings.Contains(err.Error(), "remote controlled content") {
+		t.Errorf("send() error contains response body: %v", err)
+	}
+}
+
+func TestDefaultTransportRefusesLoopback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(server.Close)
+	manager := New(nil, nil, time.Second, slog.Default())
+	if _, err := manager.send(context.Background(), server.URL, "token", []byte("{}")); err == nil {
+		t.Fatal("send() to loopback error = nil, want refusal")
 	}
 }

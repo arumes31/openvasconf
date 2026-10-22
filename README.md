@@ -210,9 +210,10 @@ $key = New-Object byte[] 32
 Set-Content -NoNewline secrets/hookwise_encryption_key ([Convert]::ToBase64String($key))
 ```
 
-Do not commit these files. The app password bootstraps the local account only
-when the database is new; changing the file later does not rotate an existing
-account.
+Do not commit these files. The app password creates the local account when the
+database is new. To rotate it, change the file and restart `openvasconf`: when
+the configured password no longer matches the stored hash, the new password
+replaces it and every existing session is revoked.
 
 ### 3. Start the complete stack
 
@@ -292,7 +293,9 @@ curl --fail http://127.0.0.1:8080/health/ready
 
 - `/health/live` returns HTTP 200 when the web process is alive.
 - `/health/ready` returns HTTP 200 only when SQLite and Greenbone respond; it
-  returns HTTP 503 while GMP is unavailable.
+  returns HTTP 503 while GMP is unavailable. Both endpoints are unauthenticated
+  and return only a status; component detail and the Greenbone version are on
+  the authenticated `/api/status`.
 
 ## First-run configuration
 
@@ -438,16 +441,19 @@ Duration values use Go syntax such as `30s`, `1m`, or `12h`.
 | `OPENVASCONF_GMP_USERNAME` | `admin` | GMP username. |
 | `OPENVASCONF_GMP_PASSWORD_FILE` | none | Preferred file containing the GMP password. |
 | `OPENVASCONF_GMP_PASSWORD` | empty | Direct GMP password fallback for development. |
-| `OPENVASCONF_ADMIN_PASSWORD_FILE` | none | Preferred local bootstrap-password file. |
-| `OPENVASCONF_ADMIN_PASSWORD` | empty | Direct local bootstrap-password fallback for development. |
+| `OPENVASCONF_ADMIN_PASSWORD_FILE` | none | Preferred local admin-password file. A changed value replaces the stored password at startup and revokes all sessions. |
+| `OPENVASCONF_ADMIN_PASSWORD` | empty | Direct local admin-password fallback for development. |
 | `OPENVASCONF_HOOKWISE_ENCRYPTION_KEY_FILE` | none | Preferred file containing 32 raw bytes, or base64 for 32 bytes, used to encrypt the Hookwise bearer token. |
 | `OPENVASCONF_HOOKWISE_ENCRYPTION_KEY` | empty | Direct encryption-key fallback for development. |
 | `OPENVASCONF_TIMEZONE` | `Europe/Vienna` | Initial schedule timezone for a new database. |
 | `OPENVASCONF_RECONCILE_INTERVAL` | `1m` | Full drift-reconciliation interval. |
 | `OPENVASCONF_EXTERNAL_TIMEOUT` | `15s` | Maximum idle time for ordinary GMP calls. |
 | `OPENVASCONF_SESSION_LIFETIME` | `12h` | Local admin session lifetime. |
+| `OPENVASCONF_SESSION_IDLE_TIMEOUT` | `2h` | End a session that has not been used for this long; `0` disables the idle limit. |
 | `OPENVASCONF_SECURE_COOKIES` | `false` | Always mark session and CSRF cookies `Secure`. |
-| `OPENVASCONF_TRUST_PROXY_TLS` | `false` | Trust `X-Forwarded-Proto: https` when deciding whether cookies are secure. |
+| `OPENVASCONF_TRUST_PROXY_TLS` | `false` (`true` in the deployment Compose file) | Trust `X-Forwarded-Proto: https` when deciding whether cookies are secure and whether to send HSTS. |
+| `OPENVASCONF_TRUST_PROXY_CLIENT_IP` | `false` (`true` in the deployment Compose file) | Key login rate limiting on the rightmost `X-Forwarded-For` address appended by the reverse proxy instead of the TCP peer. |
+| `OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP` | `false` | Permit a plain `http://` Hookwise endpoint. The bearer token and finding details then cross the network unencrypted. |
 | `OPENVASCONF_REPORT_SYNC_INTERVAL` | `2m` | Completed-report discovery and import interval. |
 | `OPENVASCONF_REPORT_FETCH_TIMEOUT` | `5m` | Maximum idle time while fetching a report from GMP. |
 | `OPENVASCONF_REPORT_MAX_XML_BYTES` | `67108864` | Maximum accepted report XML size in bytes. |
@@ -784,10 +790,17 @@ route the queued event to the correct customer.
 The endpoint must be reachable from the `openvasconf` container. `localhost`
 inside that container refers to the container itself. When both applications
 share a Docker network, use the Hookwise service DNS name and port; otherwise use
-a routed HTTPS hostname. Hookwise redirects are not followed, embedded URL
-credentials are rejected, TLS must be version 1.2 or newer, and private/self-
+a routed HTTPS hostname. The endpoint must use `https://`; a plain `http://`
+endpoint, for example a Hookwise container on the same Docker network without
+TLS, requires `OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP=true`. Hookwise
+redirects are not followed, embedded URL credentials are rejected, connections
+to loopback, link-local (including cloud metadata), multicast, and unspecified
+addresses are refused, TLS must be version 1.2 or newer, and private/self-
 signed certificate authorities must be trusted by the container. There is no
-insecure TLS switch.
+insecure TLS switch. Changing the endpoint to a different host requires the
+bearer token to be entered again, so a stored token is never sent to a new
+destination. Response bodies of rejected deliveries are written to the service
+log, not stored with the event.
 
 ### Webhook payload
 
@@ -900,16 +913,30 @@ processing failures.
 - The application has one fixed username, `admin`; it has no RBAC or customer
   user accounts.
 - Passwords are bcrypt-hashed at cost 12. Session tokens are random, stored only
-  as SHA-256 hashes, and expire after 12 hours by default.
-- Login is limited to five failed attempts per source address in 15 minutes.
+  as SHA-256 hashes, and expire after 12 hours or 2 hours of inactivity by
+  default. **Lock all sessions** in the header revokes every session; changing
+  the admin password file and restarting also revokes every session.
+- Login is limited to five failed attempts per source address (IPv6 per /64) in
+  15 minutes and 50 failed attempts across all sources in 15 minutes. Behind a
+  reverse proxy, set `OPENVASCONF_TRUST_PROXY_CLIENT_IP=true` so each client is
+  limited separately instead of sharing the proxy address.
 - Cookies are `HttpOnly` and `SameSite=Strict`; POST forms use a double-submit
-  CSRF token and request bodies are limited to 1 MiB.
+  CSRF token, which is replaced at login and logout, and request bodies are
+  limited to 1 MiB.
 - Responses set a restrictive Content Security Policy, deny framing, disable
   MIME sniffing, and use `Cache-Control: no-store`.
 - The default Compose port is host-loopback only. For remote access, place the
-  app behind an authenticated HTTPS reverse proxy and set secure cookies.
-- Set `OPENVASCONF_TRUST_PROXY_TLS=true` only when a trusted proxy overwrites the
-  forwarded-protocol header; never trust a client-supplied header directly.
+  app behind an authenticated HTTPS reverse proxy that sets
+  `X-Forwarded-Proto` and `X-Forwarded-For`. The deployment Compose file trusts
+  both headers by default because only a local proxy can reach the loopback
+  port; cookies are then `Secure` and responses carry
+  `Strict-Transport-Security` whenever the proxy reports HTTPS. Set
+  `OPENVASCONF_SECURE_COOKIES=true` to force `Secure` cookies regardless, and
+  consider enabling HSTS (with your own `includeSubDomains`/preload policy) on
+  the proxy as well.
+- Set `OPENVASCONF_TRUST_PROXY_TLS` and `OPENVASCONF_TRUST_PROXY_CLIENT_IP` to
+  `false` if the port is ever published beyond host loopback without a proxy
+  that overwrites these headers; never trust a client-supplied header directly.
 - SQLite contains customer scope, resource IDs, ownership mappings, and audit
   history. Backups must be protected as sensitive operational data.
 - The scanner needs routes to customer networks. Firewall that reachability to
@@ -993,7 +1020,7 @@ explicitly documented and tested.
 | Ownership mismatch | The mapped remote object's marker changed. `openvasconf` intentionally stops. Do not edit SQLite to bypass it; determine who changed the Greenbone object and recover from a trusted mapping/backup. |
 | Target update fails because a task references it | Re-run reconciliation. The reconciler normally trashes the owned task, updates the target, and creates a replacement. |
 | `/health/live` is 200 but `/health/ready` is 503 | The web process and SQLite may be healthy while GMP is not. Query `<get_version/>` with `gvm-tools`. |
-| Login password file changed but old password still works | The file is bootstrap-only. Existing admin hashes are not automatically rotated. |
+| Login password file changed but old password still works | Restart `openvasconf`; the password is compared and rotated at startup only. The log shows `admin password changed in configuration` when rotation happened. |
 | Browser repeatedly returns `invalid request token` | Cookies are missing, stale, or marked Secure on plain HTTP. Reload the login page and verify the proxy/TLS cookie settings. |
 | Scanner cannot reach a customer subnet | Fix Docker host routing, VPN routes, firewall rules, and scanner-container reachability; the control plane does not create network routes. |
 

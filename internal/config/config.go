@@ -20,6 +20,7 @@ const (
 	defaultReconcileEvery         = time.Minute
 	defaultExternalTimeout        = 15 * time.Second
 	defaultSessionLifetime        = 12 * time.Hour
+	defaultSessionIdleTimeout     = 2 * time.Hour
 	defaultReportSyncEvery        = 2 * time.Minute
 	defaultReportFetchTimeout     = 5 * time.Minute
 	defaultReportMaxXMLBytes      = 64 << 20
@@ -42,6 +43,7 @@ type Config struct {
 	ReconcileEvery          time.Duration
 	ExternalTimeout         time.Duration
 	SessionLifetime         time.Duration
+	SessionIdleTimeout      time.Duration
 	ReportSyncInterval      time.Duration
 	ReportFetchTimeout      time.Duration
 	ReportMaxXMLBytes       int64
@@ -51,7 +53,11 @@ type Config struct {
 	ExportMaxBytes          int64
 	SecureCookies           bool
 	TrustProxyTLSHeader     bool
+	TrustProxyClientIP      bool
 	HookwiseEncryptionKey   []byte
+	// HookwiseAllowInsecureHTTP permits a plain-http Hookwise endpoint, which
+	// sends the bearer token and finding details unencrypted.
+	HookwiseAllowInsecureHTTP bool
 }
 
 func Load() (Config, error) {
@@ -109,6 +115,11 @@ func load() (Config, []error) {
 		problems = append(problems, err)
 	}
 
+	sessionIdleTimeout, err := duration("OPENVASCONF_SESSION_IDLE_TIMEOUT", defaultSessionIdleTimeout)
+	if err != nil {
+		problems = append(problems, err)
+	}
+
 	reportSyncInterval, err := duration("OPENVASCONF_REPORT_SYNC_INTERVAL", defaultReportSyncEvery)
 	if err != nil {
 		problems = append(problems, err)
@@ -159,6 +170,16 @@ func load() (Config, []error) {
 		problems = append(problems, err)
 	}
 
+	trustProxyClientIP, err := boolean("OPENVASCONF_TRUST_PROXY_CLIENT_IP", false)
+	if err != nil {
+		problems = append(problems, err)
+	}
+
+	hookwiseAllowHTTP, err := boolean("OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP", false)
+	if err != nil {
+		problems = append(problems, err)
+	}
+
 	cfg := Config{
 		ListenAddress:           value("OPENVASCONF_LISTEN", defaultListenAddress),
 		DatabasePath:            value("OPENVASCONF_DATABASE", defaultDatabasePath),
@@ -171,6 +192,7 @@ func load() (Config, []error) {
 		ReconcileEvery:          reconcileEvery,
 		ExternalTimeout:         externalTimeout,
 		SessionLifetime:         sessionLifetime,
+		SessionIdleTimeout:      sessionIdleTimeout,
 		ReportSyncInterval:      reportSyncInterval,
 		ReportFetchTimeout:      reportFetchTimeout,
 		ReportMaxXMLBytes:       reportMaxXMLBytes,
@@ -180,7 +202,10 @@ func load() (Config, []error) {
 		ExportMaxBytes:          exportMaxBytes,
 		SecureCookies:           secureCookies,
 		TrustProxyTLSHeader:     trustProxyTLS,
+		TrustProxyClientIP:      trustProxyClientIP,
 		HookwiseEncryptionKey:   hookwiseKey,
+
+		HookwiseAllowInsecureHTTP: hookwiseAllowHTTP,
 	}
 
 	return cfg, append(problems, cfg.validate()...)
@@ -220,6 +245,9 @@ func (c Config) validate() []error {
 	}
 	if c.SessionLifetime <= 0 {
 		problems = append(problems, errors.New("config: OPENVASCONF_SESSION_LIFETIME must be positive"))
+	}
+	if c.SessionIdleTimeout < 0 {
+		problems = append(problems, errors.New("config: OPENVASCONF_SESSION_IDLE_TIMEOUT must not be negative"))
 	}
 	if c.ReportSyncInterval <= 0 {
 		problems = append(problems, errors.New("config: OPENVASCONF_REPORT_SYNC_INTERVAL must be positive"))

@@ -85,3 +85,37 @@ func TestNativeIntegerRejectsPlatformOverflow(t *testing.T) {
 		t.Errorf("nativeInteger() error = %q, want environment key", err)
 	}
 }
+
+func TestLoadSecurityOptions(t *testing.T) {
+	t.Setenv(adminSecretValueEnv, "admin-test-password")
+	t.Setenv("OPENVASCONF_ADMIN_PASSWORD_FILE", "")
+	t.Setenv("OPENVASCONF_SESSION_IDLE_TIMEOUT", "")
+	t.Setenv("OPENVASCONF_TRUST_PROXY_CLIENT_IP", "")
+	t.Setenv("OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SessionIdleTimeout != 2*time.Hour || cfg.TrustProxyClientIP || cfg.HookwiseAllowInsecureHTTP {
+		t.Errorf("defaults = idle %v, trust client ip %t, allow http %t",
+			cfg.SessionIdleTimeout, cfg.TrustProxyClientIP, cfg.HookwiseAllowInsecureHTTP)
+	}
+
+	t.Setenv("OPENVASCONF_SESSION_IDLE_TIMEOUT", "30m")
+	t.Setenv("OPENVASCONF_TRUST_PROXY_CLIENT_IP", "true")
+	t.Setenv("OPENVASCONF_HOOKWISE_ALLOW_INSECURE_HTTP", "true")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SessionIdleTimeout != 30*time.Minute || !cfg.TrustProxyClientIP || !cfg.HookwiseAllowInsecureHTTP {
+		t.Errorf("overrides = idle %v, trust client ip %t, allow http %t",
+			cfg.SessionIdleTimeout, cfg.TrustProxyClientIP, cfg.HookwiseAllowInsecureHTTP)
+	}
+
+	t.Setenv("OPENVASCONF_SESSION_IDLE_TIMEOUT", "-1m")
+	if _, err := Load(); err == nil {
+		t.Error("Load() with negative idle timeout error = nil")
+	}
+}
