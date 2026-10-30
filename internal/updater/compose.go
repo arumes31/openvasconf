@@ -413,6 +413,27 @@ func (c *Compose) ApplyStack(ctx context.Context) error {
 	return c.up(ctx, c.stackGroup)
 }
 
+// PruneImages removes dangling Greenbone images after update verification.
+// Docker retains images referenced by any running or stopped container.
+// Positive source labels keep unrelated host images outside this boundary.
+func (c *Compose) PruneImages(ctx context.Context) error {
+	for _, source := range []string{
+		"notus-data", "vulnerability-tests", "scap-data", "dfn-cert-data",
+		"cert-bund-data", "report-formats", "data-objects", "gpg-data",
+		"redis-server", "pg-gvm", "gvmd", "gsa", "gsad", "gvm-config",
+		"nginx", "openvas-scanner", "ospd-openvas", "gvm-tools",
+		"greenbone-container-images",
+	} {
+		// Label predicates are intersected by the image-prune API. Use a
+		// separate request per source so different repositories can match.
+		if _, err := c.executor.Output(ctx, "image", "prune", "--force", "--filter",
+			"label=org.opencontainers.image.source=https://github.com/greenbone/"+source); err != nil {
+			return fmt.Errorf("pruning obsolete Greenbone images for %s: %w", source, err)
+		}
+	}
+	return nil
+}
+
 func (c *Compose) up(ctx context.Context, services []string) error {
 	arguments := c.args("up", "-d", "--no-build")
 	arguments = append(arguments, services...)

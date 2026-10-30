@@ -90,9 +90,10 @@ func (r *fakeRuntime) Rollback(_ context.Context, _ []Image, backupPath string) 
 	return nil
 }
 
-func (r *fakeRuntime) PruneBackups(int, string) error { return nil }
-func (r *fakeRuntime) FeedServices() []string         { return []string{"vulnerability-tests"} }
-func (r *fakeRuntime) StackServices() []string        { return []string{"gvmd"} }
+func (r *fakeRuntime) PruneBackups(int, string) error    { return nil }
+func (r *fakeRuntime) PruneImages(context.Context) error { return nil }
+func (r *fakeRuntime) FeedServices() []string            { return []string{"vulnerability-tests"} }
+func (r *fakeRuntime) StackServices() []string           { return []string{"gvmd"} }
 
 func (r *fakeRuntime) state() (appliedFeed, applied, rolledBack, backup bool) {
 	r.mu.Lock()
@@ -352,7 +353,7 @@ func TestTriggerIsIdempotent(t *testing.T) {
 
 func newTestController(
 	t *testing.T,
-	runtime *fakeRuntime,
+	runtime Runtime,
 	scanner *fakeScanner,
 	now func() time.Time,
 ) *Controller {

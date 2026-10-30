@@ -31,6 +31,7 @@ type Runtime interface {
 	Backup(ctx context.Context, operationID string) (string, error)
 	Rollback(ctx context.Context, images []Image, backupPath string) error
 	PruneBackups(retain int, protected string) error
+	PruneImages(ctx context.Context) error
 	FeedServices() []string
 	StackServices() []string
 }
@@ -411,6 +412,7 @@ func (c *Controller) runFeed(ctx context.Context, operationID string) error {
 	c.setImages(operationID, beforeImages, afterImages)
 	if !imagesChanged(beforeImages, afterImages) {
 		c.recordScheduleCompletion(KindFeed)
+		c.pruneImages(ctx, operationID)
 		return nil
 	}
 	c.phase(operationID, StateRunning, "applying", "Copying changed feed data into Greenbone volumes.")
@@ -427,6 +429,7 @@ func (c *Controller) runFeed(ctx context.Context, operationID string) error {
 	c.state.Feeds = feeds
 	c.mu.Unlock()
 	c.recordScheduleCompletion(KindFeed)
+	c.pruneImages(ctx, operationID)
 	return nil
 }
 
@@ -473,6 +476,7 @@ func (c *Controller) runStack(
 	c.setImages(operationID, before, after)
 	if !imagesChanged(before, after) {
 		c.recordScheduleCompletion(KindStack)
+		c.pruneImages(ctx, operationID)
 		return c.runtime.PruneBackups(policy.BackupRetention, "")
 	}
 	c.phase(operationID, StateRunning, "applying", "Recreating changed Greenbone services.")
@@ -491,7 +495,15 @@ func (c *Controller) runStack(
 	if err := c.runtime.PruneBackups(policy.BackupRetention, ""); err != nil {
 		c.logger.Warn("pruning updater backups failed", "error", err)
 	}
+	c.pruneImages(ctx, operationID)
 	return nil
+}
+
+func (c *Controller) pruneImages(ctx context.Context, operationID string) {
+	c.phase(operationID, StateRunning, "cleanup", "Removing obsolete Greenbone images.")
+	if err := c.runtime.PruneImages(ctx); err != nil {
+		c.logger.Warn("pruning updater images failed", "error", err)
+	}
 }
 
 func (c *Controller) waitForScans(

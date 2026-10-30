@@ -528,6 +528,14 @@ set, and verifies GMP/feed availability. Failed verification restores the prior
 images and database checkpoint, then pauses stack automation until an admin
 reviews and acknowledges the result.
 
+After a successful feed refresh or verified stack upgrade, the helper removes
+dangling Greenbone images, including obsolete daily feed images. Cleanup uses
+positive Greenbone source-label filters and never prunes volumes, containers,
+unrelated images, or tagged images. Images needed by running or stopped
+containers are retained by Docker. Cleanup also runs on successful checks for
+an already-current feed or stack; it does not run on failed verification or
+rollback, and a cleanup failure is logged without rolling back a healthy update.
+
 Deployment-only services, including `gvmd-user-init`, `openvasconf`, and the
 updater helper itself, are never recreated by an automated Greenbone upgrade.
 
@@ -545,6 +553,17 @@ daemons to finish importing the data. Do not combine this with a separate
 `greenbone-feed-sync` job against the same volumes.
 
 ### Scan reports
+
+Report history is limited to the newest **three imported reports per managed
+scan task/target**. Managed Greenbone tasks use the same three-report retention
+policy. Existing managed tasks receive it during reconciliation; existing local
+history is trimmed during report synchronization, even without a new import.
+Current findings, task-specific annotations, first/last-seen dates, ticket
+generations, and queued ticket events survive report expiry. Expired report
+detail links no longer resolve, and closed-ticket events whose report expired
+omit the report link. Failed import diagnostics remain available for retries.
+Deleted SQLite/PostgreSQL pages become reusable database space; retention does
+not perform a blocking database compaction.
 
 `openvasconf` periodically discovers completed Greenbone reports for managed
 tasks and imports normalized, immutable snapshots (findings, severities, and
