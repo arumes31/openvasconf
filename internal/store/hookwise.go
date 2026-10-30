@@ -91,19 +91,22 @@ func (s *Store) ReconcileHookwiseOutbox(ctx context.Context) error {
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT s.customer_id, c.name, c.connectwise_customer_name,
-		       s.task_id, r.task_name,
-		       s.fingerprint, f.title, f.host, f.port, s.severity, f.cves,
-		       f.remediation, f.nvt_oid, f.location, f.threat, f.qod,
-		       f.evidence, f.cvss_vector, f.summary, f.insight, f.impact,
-		       f.affected, f.solution_type, f.nvt_references,
-		       r.report_id, r.scan_end_at,
-		       s.last_snapshot_id, s.present, s.disposition,
+		       s.task_id, COALESCE(r.task_name, s.task_id),
+		       s.fingerprint, COALESCE(f.title, ''), COALESCE(f.host, ''),
+		       COALESCE(f.port, ''), s.severity, COALESCE(f.cves, ''),
+		       COALESCE(f.remediation, ''), COALESCE(f.nvt_oid, ''),
+		       COALESCE(f.location, ''), COALESCE(f.threat, ''), COALESCE(f.qod, 0),
+		       COALESCE(f.evidence, ''), COALESCE(f.cvss_vector, ''),
+		       COALESCE(f.summary, ''), COALESCE(f.insight, ''), COALESCE(f.impact, ''),
+		       COALESCE(f.affected, ''), COALESCE(f.solution_type, ''), COALESCE(f.nvt_references, '[]'),
+		       COALESCE(r.report_id, ''), COALESCE(r.scan_end_at, s.last_seen_at),
+		       COALESCE(s.last_snapshot_id, 0), s.present, s.disposition,
 		       s.remediation_state, s.justification,
 		       s.ticket_desired_open, s.ticket_generation
 		FROM finding_states s
 		JOIN customers c ON c.id = s.customer_id
-		JOIN report_snapshots r ON r.id = s.last_snapshot_id
-		JOIN finding_snapshots f
+		LEFT JOIN report_snapshots r ON r.id = s.last_snapshot_id
+		LEFT JOIN finding_snapshots f
 		  ON f.snapshot_id = s.last_snapshot_id AND f.fingerprint = s.fingerprint
 		WHERE c.deleted_at IS NULL`)
 	if err != nil {
@@ -196,7 +199,7 @@ func enqueueHookwiseTx(
 		return err
 	}
 	description := hookwiseDescription(value)
-	payload, err := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"event_id":                  fmt.Sprintf("%s:%d:%s", findingKey, generation, eventType),
 		"state":                     eventType,
 		"connectwise_customer_name": value.ConnectWiseCustomerName,
@@ -232,7 +235,31 @@ func enqueueHookwiseTx(
 		"resolution":                value.Justification,
 		"remediation_state":         value.RemediationState,
 		"report_path":               fmt.Sprintf("/reports/%d", value.SnapshotID),
-	})
+	}
+	// A close may be queued after its historical report expired. Preserve the
+	// original ticket context without retaining the entire report forever.
+	if eventType == "closed" && value.SnapshotID == 0 {
+		var encoded []byte
+		if err := tx.QueryRowContext(ctx, `
+			SELECT payload FROM hookwise_outbox
+			WHERE customer_id = ? AND task_id = ? AND fingerprint = ?
+			  AND generation = ? AND event_type = 'open' ORDER BY id DESC LIMIT 1`,
+			value.CustomerID, value.TaskID, value.Fingerprint, generation,
+		).Scan(&encoded); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("loading expired report ticket context: %w", err)
+		} else if err == nil {
+			var original map[string]any
+			if err := json.Unmarshal(encoded, &original); err != nil {
+				return fmt.Errorf("decoding expired report ticket context: %w", err)
+			}
+			for _, key := range []string{"event_id", "state", "resolution", "remediation_state"} {
+				original[key] = fields[key]
+			}
+			fields = original
+		}
+		fields["report_path"] = ""
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return fmt.Errorf("encoding hookwise event: %w", err)
 	}

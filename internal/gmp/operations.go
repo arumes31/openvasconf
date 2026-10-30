@@ -219,16 +219,17 @@ type namedReference struct {
 }
 
 type taskWire struct {
-	ID         string         `xml:"id,attr"`
-	Name       string         `xml:"name"`
-	Comment    string         `xml:"comment"`
-	Status     string         `xml:"status"`
-	Progress   int            `xml:"progress"`
-	Target     namedReference `xml:"target"`
-	Config     namedReference `xml:"config"`
-	Scanner    namedReference `xml:"scanner"`
-	Schedule   namedReference `xml:"schedule"`
-	LastReport struct {
+	ID          string           `xml:"id,attr"`
+	Name        string           `xml:"name"`
+	Comment     string           `xml:"comment"`
+	Status      string           `xml:"status"`
+	Progress    int              `xml:"progress"`
+	Target      namedReference   `xml:"target"`
+	Config      namedReference   `xml:"config"`
+	Scanner     namedReference   `xml:"scanner"`
+	Schedule    namedReference   `xml:"schedule"`
+	Preferences []taskPreference `xml:"preferences>preference"`
+	LastReport  struct {
 		Report reportWire `xml:"report"`
 	} `xml:"last_report"`
 }

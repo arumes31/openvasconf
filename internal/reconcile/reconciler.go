@@ -56,6 +56,7 @@ type Greenbone interface {
 	DeleteTarget(ctx context.Context, targetID string) error
 	CreateTask(ctx context.Context, value gmp.Task) (string, error)
 	ModifyTask(ctx context.Context, taskID string, value gmp.Task) error
+	EnsureTaskReportRetention(ctx context.Context, taskID string) error
 	DeleteTask(ctx context.Context, taskID string) error
 	ResourceComment(ctx context.Context, kind, resourceID string) (string, error)
 	FindResource(ctx context.Context, kind, ownershipMarker string) (string, bool, error)
@@ -545,6 +546,18 @@ func (r *Reconciler) applyTask(
 	existing map[resourceKey]store.ManagedResource,
 ) (store.ManagedResource, error) {
 	hash := desiredHash(value)
+	if resource, found := existing[resourceKey]; found && resource.GVMID != "" && resource.State == "applied" && resource.DesiredHash == hash {
+		owned, err := r.isOwned(ctx, resource, marker)
+		if err != nil {
+			return store.ManagedResource{}, err
+		}
+		if !owned {
+			return store.ManagedResource{}, ErrOwnershipMismatch
+		}
+		if err := r.greenbone.EnsureTaskReportRetention(ctx, resource.GVMID); err != nil {
+			return store.ManagedResource{}, r.recordResourceError(ctx, resource, err)
+		}
+	}
 	if err := r.replaceChangedTask(ctx, customerID, resourceKey, hash, existing); err != nil {
 		return store.ManagedResource{}, err
 	}

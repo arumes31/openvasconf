@@ -34,6 +34,30 @@ type fakeReportStore struct {
 	resetCount    int
 	deleted       []string
 	scanAlerts    []store.ScanAlert
+	pruneCount    int
+	pruneErr      error
+}
+
+func (f *fakeReportStore) PruneReportSnapshots(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pruneCount++
+	return f.pruneErr
+}
+
+func TestSyncerPrunesReportsEvenWithoutNewImports(t *testing.T) {
+	repository := newFakeReportStore()
+	syncer := newTestSyncer(repository, &fakeReportGMP{})
+	if err := syncer.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if repository.pruneCount != 1 {
+		t.Fatal("existing report history was not pruned")
+	}
+	repository.pruneErr = errors.New("retention failed")
+	if err := syncer.SyncOnce(t.Context()); !errors.Is(err, repository.pruneErr) {
+		t.Fatalf("retention error = %v", err)
+	}
 }
 
 func (f *fakeReportStore) DeleteFailedReportImport(_ context.Context, reportID string) error {

@@ -66,6 +66,9 @@ func TestReconcilerLifecycle(t *testing.T) {
 	if len(greenbone.operations) != 0 {
 		t.Errorf("idempotent run operations = %v, want none", greenbone.operations)
 	}
+	if len(greenbone.retentionChecks) != 19 {
+		t.Errorf("existing task retention checks = %d, want 19", len(greenbone.retentionChecks))
+	}
 
 	value, err = repository.Customer(t.Context(), value.ID)
 	if err != nil {
@@ -642,12 +645,13 @@ func lastOperationIndex(operations []string, prefix string) int {
 }
 
 type fakeGreenbone struct {
-	nextID         int
-	taskCreates    int
-	failTaskCreate int
-	comments       map[string]string
-	operations     []string
-	targets        []gmp.Target
+	nextID          int
+	taskCreates     int
+	failTaskCreate  int
+	comments        map[string]string
+	operations      []string
+	targets         []gmp.Target
+	retentionChecks []string
 }
 
 func newFakeGreenbone() *fakeGreenbone {
@@ -702,6 +706,11 @@ func (f *fakeGreenbone) CreateTask(_ context.Context, value gmp.Task) (string, e
 
 func (f *fakeGreenbone) ModifyTask(_ context.Context, id string, value gmp.Task) error {
 	return f.modify("task", id, value.Name, value.Comment)
+}
+
+func (f *fakeGreenbone) EnsureTaskReportRetention(_ context.Context, taskID string) error {
+	f.retentionChecks = append(f.retentionChecks, taskID)
+	return nil
 }
 
 func (f *fakeGreenbone) DeleteTask(_ context.Context, id string) error {

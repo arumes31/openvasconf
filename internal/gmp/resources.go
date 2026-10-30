@@ -199,46 +199,58 @@ type targetRequest struct {
 
 func (c *Client) CreateTask(ctx context.Context, value Task) (string, error) {
 	request := taskRequest{
-		XMLName:   xml.Name{Local: "create_task"},
-		Name:      value.Name,
-		Comment:   value.Comment,
-		Config:    resourceReference{ID: value.ConfigID},
-		Target:    resourceReference{ID: value.TargetID},
-		Scanner:   resourceReference{ID: value.ScannerID},
-		Schedule:  resourceReference{ID: value.ScheduleID},
-		Periods:   value.ScheduleRuns,
-		Alterable: 1,
+		XMLName:     xml.Name{Local: "create_task"},
+		Name:        value.Name,
+		Comment:     value.Comment,
+		Config:      resourceReference{ID: value.ConfigID},
+		Target:      resourceReference{ID: value.TargetID},
+		Scanner:     resourceReference{ID: value.ScannerID},
+		Schedule:    resourceReference{ID: value.ScheduleID},
+		Periods:     value.ScheduleRuns,
+		Alterable:   1,
+		Preferences: reportRetentionPreferences(),
 	}
 	return c.create(ctx, "create_task", request)
 }
 
 func (c *Client) ModifyTask(ctx context.Context, taskID string, value Task) error {
 	request := taskRequest{
-		XMLName:    xml.Name{Local: "modify_task"},
-		ResourceID: taskID,
-		Name:       value.Name,
-		Comment:    value.Comment,
-		Config:     resourceReference{ID: value.ConfigID},
-		Target:     resourceReference{ID: value.TargetID},
-		Scanner:    resourceReference{ID: value.ScannerID},
-		Schedule:   resourceReference{ID: value.ScheduleID},
-		Periods:    value.ScheduleRuns,
-		Alterable:  1,
+		XMLName:     xml.Name{Local: "modify_task"},
+		ResourceID:  taskID,
+		Name:        value.Name,
+		Comment:     value.Comment,
+		Config:      resourceReference{ID: value.ConfigID},
+		Target:      resourceReference{ID: value.TargetID},
+		Scanner:     resourceReference{ID: value.ScannerID},
+		Schedule:    resourceReference{ID: value.ScheduleID},
+		Periods:     value.ScheduleRuns,
+		Alterable:   1,
+		Preferences: reportRetentionPreferences(),
 	}
 	return c.modify(ctx, "modify_task", request)
 }
 
 type taskRequest struct {
-	XMLName    xml.Name
-	ResourceID string            `xml:"task_id,attr,omitempty"`
-	Name       string            `xml:"name"`
-	Comment    string            `xml:"comment"`
-	Config     resourceReference `xml:"config"`
-	Target     resourceReference `xml:"target"`
-	Scanner    resourceReference `xml:"scanner"`
-	Schedule   resourceReference `xml:"schedule"`
-	Periods    int               `xml:"schedule_periods"`
-	Alterable  int               `xml:"alterable"`
+	XMLName     xml.Name
+	ResourceID  string            `xml:"task_id,attr,omitempty"`
+	Name        string            `xml:"name"`
+	Comment     string            `xml:"comment"`
+	Config      resourceReference `xml:"config"`
+	Target      resourceReference `xml:"target"`
+	Scanner     resourceReference `xml:"scanner"`
+	Schedule    resourceReference `xml:"schedule"`
+	Periods     int               `xml:"schedule_periods"`
+	Alterable   int               `xml:"alterable"`
+	Preferences []taskPreference  `xml:"preferences>preference,omitempty"`
+}
+
+type taskPreference struct {
+	Name  string `xml:"scanner_name"`
+	Value string `xml:"value"`
+}
+
+func reportRetentionPreferences() []taskPreference {
+	return []taskPreference{{Name: "auto_delete", Value: "keep"}, {Name: "auto_delete_data", Value: "3"}}
 }
 
 type resourceReference struct {

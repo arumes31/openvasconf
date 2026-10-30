@@ -45,6 +45,7 @@ type Store interface {
 	CustomerForManagedTask(ctx context.Context, gvmTaskID string) (string, error)
 	ReportImportStats(ctx context.Context) (store.ReportImportStats, error)
 	RecordScanFailure(ctx context.Context, alert store.ScanAlert) (bool, error)
+	PruneReportSnapshots(ctx context.Context) error
 }
 
 // Greenbone is the narrow GMP facade the syncer needs.
@@ -231,6 +232,9 @@ func (s *Syncer) syncLocked(ctx context.Context) error {
 	}
 	wg.Wait()
 	if err != nil {
+		return err
+	}
+	if err := s.store.PruneReportSnapshots(ctx); err != nil {
 		return err
 	}
 	if failed > 0 {
