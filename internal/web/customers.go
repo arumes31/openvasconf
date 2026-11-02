@@ -275,6 +275,7 @@ func (s *Server) customerFromForm(
 	request *http.Request,
 	existing *customer.Customer,
 ) (customer.Customer, networkplan.Plan, customerForm, error) {
+	weekday, _ := strconv.Atoi(request.PostForm.Get("schedule_weekday"))
 	form := customerForm{
 		Name:                    strings.TrimSpace(request.PostForm.Get("name")),
 		ConnectWiseCustomerName: request.PostForm.Get("connectwise_customer_name"),
@@ -285,6 +286,12 @@ func (s *Server) customerFromForm(
 		ScanConfigID:            request.PostForm.Get("scan_config_id"),
 		PortListID:              request.PostForm.Get("port_list_id"),
 		Editing:                 existing != nil,
+		Weekday:                 weekday,
+		Time:                    request.PostForm.Get("schedule_time"),
+	}
+	if existing != nil {
+		form.ID = existing.ID
+		form.Schedule = formFromCustomer(*existing).Schedule
 	}
 	if len(form.Description) > 500 {
 		return customer.Customer{}, networkplan.Plan{}, form, errors.New("customer description must contain at most 500 characters")
@@ -295,10 +302,6 @@ func (s *Server) customerFromForm(
 	tags, err := customer.NormalizeTags(form.Tags)
 	if err != nil {
 		return customer.Customer{}, networkplan.Plan{}, form, err
-	}
-	if existing != nil {
-		form.ID = existing.ID
-		form.Schedule = formFromCustomer(*existing).Schedule
 	}
 	if form.Name == "" || len(form.Name) > 100 {
 		return customer.Customer{}, networkplan.Plan{}, form, errors.New("customer name must contain 1 to 100 characters")
@@ -391,17 +394,20 @@ func (s *Server) customerFromForm(
 		value.PortListID, value.PortListName = selection.ID, selection.Name
 	}
 
-	seen := make(map[string]struct{}, len(inputs))
-	for _, input := range inputs {
+	seen := make(map[string]int, len(inputs))
+	for index, input := range inputs {
 		prefixes, expandErr := networkplan.Expand(input)
 		if expandErr != nil {
 			return customer.Customer{}, networkplan.Plan{}, form, expandErr
 		}
 		for _, prefix := range prefixes {
-			if _, duplicate := seen[prefix.String()]; duplicate {
-				continue
+			if first, duplicate := seen[prefix.String()]; duplicate {
+				return customer.Customer{}, networkplan.Plan{}, form, fmt.Errorf(
+					"duplicate network/IP at entry %d: %s is already included in entry %d; remove the duplicate before saving",
+					index+1, prefix, first+1,
+				)
 			}
-			seen[prefix.String()] = struct{}{}
+			seen[prefix.String()] = index
 			inputPlan, buildErr := networkplan.Build(networkplan.Input{
 				CustomerName: form.Name,
 				Networks:     []string{prefix.String()},

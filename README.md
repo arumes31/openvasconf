@@ -75,6 +75,7 @@ The preview and reconciler use the same deterministic network plan:
    converted into the smallest exact set of CIDRs before planning.
 5. Prefixes broader than `/24` are split into `/24` entries.
 6. Duplicate and overlapping coverage is scanned once.
+
 7. RFC1918 space is grouped as `PrivateIP`; public global-unicast space is
    grouped as `WAN`.
 8. Private and WAN entries are never mixed in the same target.
@@ -83,6 +84,12 @@ The preview and reconciler use the same deterministic network plan:
 10. A target can contain multiple prefixes, but never more than 4,095 unique IPs.
 11. Special-use ranges such as loopback, link-local, CGNAT, documentation,
    multicast, and reserved space are rejected.
+
+Customer forms reject duplicate network/IP entries before confirmation and show
+the conflicting entry numbers and canonical prefix. This includes a bare IP
+repeated as `/32`, different comments on the same address, and equivalent CIDRs.
+The entered list and schedule stay in the form for correction. CSV/text loading
+and **Copy normalized list** preserve duplicate lines so they can be validated.
 
 Single hosts remain canonical `/32` values in SQLite. They are sent to current
 `gvmd` versions as bare IPv4 addresses because GMP target host specifications
