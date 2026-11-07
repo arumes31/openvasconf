@@ -1125,7 +1125,10 @@ node scripts/check-npm-licenses.mjs
 | `internal/customer` | Customer, scheduling, and portable document models |
 | `internal/networkplan` | IPv4 normalization, classification, splitting, and packing |
 | `internal/gmp` | GMP XML client over the `gvmd` Unix socket |
+| `internal/hookwise` | Webhook notification dispatch to Hookwise |
+| `internal/id` | Cryptographic identifier and random token generation |
 | `internal/reconcile` | Idempotent desired-state application and cleanup |
+| `internal/report` | Scan report synchronization, normalization, fingerprinting, and PDF export |
 | `internal/store` | SQLite migrations, persistence, history, and ownership mappings |
 | `internal/updater` | Update protocol, scheduler, state machine, Compose allowlist, backup, and rollback |
 | `internal/web` | HTTP routes, security middleware, templates, and static assets |
