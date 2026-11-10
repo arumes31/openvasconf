@@ -1,10 +1,9 @@
 name: CI
 
 on:
+  # Pushes to main run this workflow through the "Publish container" release
+  # gate (workflow_call), so a separate push trigger would duplicate it.
   pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
   workflow_call:
 
@@ -12,8 +11,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   quality:
