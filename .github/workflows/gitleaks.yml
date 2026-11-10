@@ -1,9 +1,8 @@
 name: Secret scanning
 on:
-  # Feature-branch pushes are scanned by the pull_request run.
+  # Every pushed branch is scanned (even without a PR); the pull_request run
+  # therefore only scans fork PRs, whose commits never reach a push here.
   push:
-    branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -13,6 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   scan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
