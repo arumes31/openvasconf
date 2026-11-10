@@ -6,6 +6,11 @@ on:
       - main
     tags:
       - v*.*.*
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
   release:
     types:
       - published

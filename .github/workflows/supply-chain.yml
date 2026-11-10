@@ -9,6 +9,8 @@ on:
         type: boolean
         default: false
   pull_request:
+  # Direct pushes to main only publish Scorecard; the integrity and workflow
+  # checks already run there through the "Publish container" release gate.
   push:
     branches:
       - main
@@ -18,12 +20,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: supply-chain-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   integrity-and-licenses:
     name: Module integrity and licenses
+    # Skip on a direct push (covered by the release gate, which sets skip_scorecard).
+    if: ${{ github.event_name != 'push' || inputs.skip_scorecard }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -65,6 +69,8 @@ jobs:
 
   workflow-security:
     name: Workflow lint and security
+    # Skip on a direct push (covered by the release gate, which sets skip_scorecard).
+    if: ${{ github.event_name != 'push' || inputs.skip_scorecard }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
