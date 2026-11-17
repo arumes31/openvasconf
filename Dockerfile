@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
-FROM node:26.12.1-alpine3.24@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS assets
+FROM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS assets
 
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -27,7 +27,7 @@ FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0
 
 RUN apk add --no-cache \
         docker-cli=29.9.3-r1 \
-        docker-cli-compose=5.6.1-r0 \
+        docker-cli-compose=5.7.2-r0 \
         libcrypto3=3.5.9-r0 \
         libssl3=3.5.9-r0 \
     && addgroup -g 1001 -S openvasconf \
