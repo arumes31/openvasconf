@@ -27,7 +27,7 @@ FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0
 
 RUN apk add --no-cache \
         docker-cli=29.9.3-r1 \
-        docker-cli-compose=5.6.1-r0 \
+        docker-cli-compose=5.7.2-r0 \
         libcrypto3=3.5.9-r0 \
         libssl3=3.5.9-r0 \
     && addgroup -g 1001 -S openvasconf \
